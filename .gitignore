@@ -23,6 +23,10 @@ out/
 dashboard/node_modules/
 dashboard/dist/
 
+### Runtime Weixin state and QR credentials ###
+.priestess/
+data/weixin*/
+
 ### Local manual integration launchers ###
 src/test/*.local.bat
 deploy-nas.local.bat
@@ -52,3 +56,11 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### Application resource runtime ###
+/platform/
+/agents/
+/data/local-debug/
+/.env.local-debug
+/local.properties
+/config.local-debug.json

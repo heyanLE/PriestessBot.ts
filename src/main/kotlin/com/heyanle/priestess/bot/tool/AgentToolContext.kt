@@ -12,7 +12,7 @@ import com.heyanle.priestess.bot.pipeline.PermissionGroup
  * This is a lightweight context designed for tool use. The full AgentContext
  * in the agent loop is richer; tools only need this subset.
  */
-data class AgentToolContext(
+data class AgentToolContext @JvmOverloads constructor(
     val conversationId: String = "",
     /**
      * The current platform instance for sending messages.
@@ -51,4 +51,7 @@ data class AgentToolContext(
      */
     val skillState: PipelineSkillState = PipelineSkillState(),
     val permissionGroup: PermissionGroup = PermissionGroup.OPERATOR,
+    /** Per-Agent role floors chosen in the Agent's tool settings. */
+    val minimumToolPermissionGroups: Map<String, PermissionGroup> = emptyMap(),
+    val responseIntent: com.heyanle.priestess.bot.message.ResponseIntent = com.heyanle.priestess.bot.message.ResponseIntent(),
 )

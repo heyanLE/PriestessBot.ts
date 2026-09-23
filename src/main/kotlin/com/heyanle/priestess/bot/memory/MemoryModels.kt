@@ -45,6 +45,7 @@ data class MemoryRecord(
     val updatedAt: Long,
     val expiresAt: Long? = null,
     val deletedAt: Long? = null,
+    val libraryId: String = "default",
 )
 
 /**
@@ -56,6 +57,10 @@ data class MemoryScopeContext(
     val sessionId: String? = null,
     val userId: String? = null,
     val agentName: String? = null,
+    /** null is an administrative cross-library query; an empty set grants no library access. */
+    val libraryIds: Set<String>? = null,
+    /** null leaves scope policy unrestricted; an empty set makes every scope unavailable. */
+    val allowedScopes: Set<MemoryScope>? = null,
 ) {
     companion object {
         const val DEFAULT_WORKSPACE_ID = "default"

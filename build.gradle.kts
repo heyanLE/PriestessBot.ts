@@ -11,6 +11,15 @@ application {
     mainClass.set("com.heyanle.priestess.bot.PriestessBotKt")
 }
 
+tasks.named<JavaExec>("run") {
+    doFirst {
+        val hasConfigArgument = args.orEmpty().any { it == "--config" || it.startsWith("--config=") }
+        if (!hasConfigArgument) {
+            args("--config", providers.gradleProperty("configPath").getOrElse("config.json"))
+        }
+    }
+}
+
 repositories {
     mavenCentral()
 }
@@ -29,6 +38,9 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-jdbc:0.51.1")
     implementation("org.xerial:sqlite-jdbc:3.46.1.3")
     implementation("org.snakeyaml:snakeyaml-engine:2.7")
+    implementation("org.commonmark:commonmark:0.24.0")
+    implementation("org.commonmark:commonmark-ext-gfm-tables:0.24.0")
+    implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.24.0")
     implementation("io.ktor:ktor-client-core:3.0.3")
     implementation("io.ktor:ktor-client-cio:3.0.3")
     implementation("io.ktor:ktor-client-content-negotiation:3.0.3")
@@ -39,6 +51,7 @@ dependencies {
     implementation("io.ktor:ktor-server-content-negotiation:3.0.3")
     implementation("io.ktor:ktor-server-websockets:3.0.3")
     implementation("io.ktor:ktor-server-cors:3.0.3")
+    implementation("com.google.zxing:core:3.5.3")
     implementation("io.ktor:ktor-server-status-pages:3.0.3")
 }
 

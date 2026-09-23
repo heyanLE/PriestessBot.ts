@@ -4,55 +4,54 @@
       <div class="tactical-list-hero-grid">
         <div class="tactical-list-copy">
           <div class="tactical-list-band">
-            <span>Assets</span>
-            <span>Providers</span>
+            <span>资源</span>
+            <span>模型服务</span>
           </div>
 
-          <h2>Provider capability matrix</h2>
+          <h2>模型服务能力矩阵</h2>
           <p>
-            Review provider coverage, capability depth, and health posture from one clean
-            inventory before the runtime hands off requests.
+            在运行时分发请求前，统一查看模型服务覆盖范围、能力和健康状态。
           </p>
 
           <div class="tactical-stat-grid">
             <article class="card tactical-stat-card">
-              <span class="tactical-stat-label">Registered</span>
+              <span class="tactical-stat-label">已注册</span>
               <strong>{{ store.providers.length }}</strong>
-              <p>providers cataloged in the current runtime registry.</p>
+              <p>当前运行时中登记的模型服务。</p>
             </article>
             <article class="card tactical-stat-card">
-              <span class="tactical-stat-label">Tool Ready</span>
+              <span class="tactical-stat-label">支持工具</span>
               <strong>{{ toolReadyCount }}</strong>
-              <p>lanes that can accept tool-calling contracts.</p>
+              <p>支持工具调用协议的模型服务。</p>
             </article>
             <article class="card tactical-stat-card">
-              <span class="tactical-stat-label">Vision Ready</span>
+              <span class="tactical-stat-label">支持视觉</span>
               <strong>{{ visionReadyCount }}</strong>
-              <p>providers that can process image-bearing operator requests.</p>
+              <p>能够处理图片输入的模型服务。</p>
             </article>
             <article class="card tactical-stat-card">
-              <span class="tactical-stat-label">Verified Online</span>
+              <span class="tactical-stat-label">在线验证</span>
               <strong>{{ onlineCount }}</strong>
-              <p>{{ testedCount > 0 ? `${testedCount} tested in the last sweep.` : 'Awaiting a health sweep.' }}</p>
+              <p>{{ testedCount > 0 ? `最近已测试 ${testedCount} 个。` : '等待健康检查。' }}</p>
             </article>
           </div>
         </div>
 
         <aside class="tactical-ledger">
-          <h3>What matters here</h3>
-          <p>Use capability coverage to compare fit, then verify online status only when a runtime issue appears.</p>
+          <h3>检查重点</h3>
+          <p>先根据能力覆盖比较适用性，再在运行异常时验证在线状态。</p>
 
           <div class="tactical-ledger-row">
-            <span>Health sweep</span>
-            <strong>{{ testedCount > 0 ? `${onlineCount}/${testedCount} online` : 'Not run yet' }}</strong>
+            <span>健康检查</span>
+            <strong>{{ testedCount > 0 ? `${onlineCount}/${testedCount} 在线` : '尚未运行' }}</strong>
           </div>
           <div class="tactical-ledger-row">
-            <span>Streaming cover</span>
-            <strong>{{ streamingReadyCount }} lanes support live response flow</strong>
+            <span>流式覆盖</span>
+            <strong>{{ streamingReadyCount }} 个模型服务支持流式响应</strong>
           </div>
           <div class="tactical-ledger-row">
-            <span>Operator note</span>
-            <strong>Keep high-capability routes visible before agent routing decisions fan out.</strong>
+            <span>操作建议</span>
+            <strong>在智能体路由分流前，确保高能力模型服务清晰可见。</strong>
           </div>
         </aside>
       </div>
@@ -61,17 +60,17 @@
     <section class="panel tactical-table-panel">
       <div class="section-title">
         <div>
-          <h2>Provider registry</h2>
-          <p>{{ store.providers.length }} runtime providers registered.</p>
+          <h2>模型服务列表</h2>
+          <p>已注册 {{ store.providers.length }} 个运行时模型服务。</p>
         </div>
-        <button type="button" class="primary" @click="store.testProviders()">Test All</button>
+        <button type="button" class="primary" @click="store.testProviders()">全部测试</button>
       </div>
 
       <EmptyState
         v-if="store.providers.length === 0"
         class="tactical-empty"
-        title="No providers registered"
-        detail="Provider capability cards will appear after the runtime publishes its registry."
+        title="暂无模型服务"
+        detail="运行时发布模型服务列表后，能力卡片会显示在这里。"
       />
 
       <div v-else class="tactical-card-grid">
@@ -86,24 +85,24 @@
 
           <div class="tactical-kv-list">
             <div class="tactical-kv">
-              <span class="tactical-inline-code">Tools</span>
+              <span class="tactical-inline-code">工具调用</span>
               <strong>{{ yesNo(provider.supportToolCalling) }}</strong>
             </div>
             <div class="tactical-kv">
-              <span class="tactical-inline-code">Vision</span>
+              <span class="tactical-inline-code">视觉</span>
               <strong>{{ yesNo(provider.supportVision) }}</strong>
             </div>
             <div class="tactical-kv">
-              <span class="tactical-inline-code">Streaming</span>
+              <span class="tactical-inline-code">流式响应</span>
               <strong>{{ yesNo(provider.supportStreaming) }}</strong>
             </div>
           </div>
 
           <div class="tactical-chip-list">
-            <span v-if="provider.supportToolCalling" class="chip">Tool Calling</span>
-            <span v-if="provider.supportVision" class="chip">Vision</span>
-            <span v-if="provider.supportStreaming" class="chip">Streaming</span>
-            <span v-if="!provider.supportToolCalling && !provider.supportVision && !provider.supportStreaming" class="chip">Text Only</span>
+            <span v-if="provider.supportToolCalling" class="chip">工具调用</span>
+            <span v-if="provider.supportVision" class="chip">视觉</span>
+            <span v-if="provider.supportStreaming" class="chip">流式响应</span>
+            <span v-if="!provider.supportToolCalling && !provider.supportVision && !provider.supportStreaming" class="chip">仅文本</span>
           </div>
         </article>
       </div>
@@ -112,8 +111,8 @@
     <section v-if="store.providers.length > 0" class="panel tactical-table-panel">
       <div class="section-title compact">
         <div>
-          <h2>Dense matrix</h2>
-          <p>Compact operator readout for fast side-by-side comparison.</p>
+          <h2>紧凑矩阵</h2>
+          <p>用于快速横向比较的紧凑视图。</p>
         </div>
       </div>
 
@@ -121,10 +120,10 @@
         <table class="table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Kind</th>
-              <th>Health</th>
-              <th>Capabilities</th>
+              <th>名称</th>
+              <th>类型</th>
+              <th>健康状态</th>
+              <th>能力</th>
             </tr>
           </thead>
           <tbody>
@@ -139,9 +138,9 @@
               </td>
               <td>
                 <div class="chip-row">
-                  <span class="chip">Tools {{ yesNo(provider.supportToolCalling) }}</span>
-                  <span class="chip">Vision {{ yesNo(provider.supportVision) }}</span>
-                  <span class="chip">Streaming {{ yesNo(provider.supportStreaming) }}</span>
+                  <span class="chip">工具 {{ yesNo(provider.supportToolCalling) }}</span>
+                  <span class="chip">视觉 {{ yesNo(provider.supportVision) }}</span>
+                  <span class="chip">流式 {{ yesNo(provider.supportStreaming) }}</span>
                 </div>
               </td>
             </tr>
@@ -167,8 +166,8 @@ const testedCount = computed(() => Object.keys(store.providerTests).length);
 const onlineCount = computed(() => Object.values(store.providerTests).filter(Boolean).length);
 
 function healthLabel(name: string) {
-  if (!(name in store.providerTests)) return 'Not tested';
-  return store.providerTests[name] ? 'Online' : 'Failed';
+  if (!(name in store.providerTests)) return '未测试';
+  return store.providerTests[name] ? '在线' : '失败';
 }
 
 function healthTone(name: string): 'ok' | 'warn' | 'muted' | 'error' {
@@ -177,6 +176,6 @@ function healthTone(name: string): 'ok' | 'warn' | 'muted' | 'error' {
 }
 
 function yesNo(value: boolean) {
-  return value ? 'Yes' : 'No';
+  return value ? '是' : '否';
 }
 </script>

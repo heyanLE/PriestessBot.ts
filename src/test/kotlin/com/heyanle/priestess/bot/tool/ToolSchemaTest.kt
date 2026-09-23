@@ -1,6 +1,5 @@
 package com.heyanle.priestess.bot.tool
 
-import com.heyanle.priestess.bot.tool.builtin.EarlyReplyTool
 import com.heyanle.priestess.bot.tool.builtin.FetchUrlTool
 import com.heyanle.priestess.bot.tool.builtin.HealthCheckTool
 import com.heyanle.priestess.bot.tool.builtin.KnowledgeSearchTool
@@ -12,7 +11,6 @@ import com.heyanle.priestess.bot.tool.builtin.MemoryDeleteTool
 import com.heyanle.priestess.bot.tool.builtin.MemoryRecallTool
 import com.heyanle.priestess.bot.tool.builtin.MemorySaveTool
 import com.heyanle.priestess.bot.tool.builtin.ConversationSearchTool
-import com.heyanle.priestess.bot.tool.builtin.SendMessageTool
 import com.heyanle.priestess.bot.tool.builtin.SystemInfoTool
 import com.heyanle.priestess.bot.tool.builtin.UnloadSkillTool
 import com.heyanle.priestess.bot.tool.builtin.UseSkillTool
@@ -63,8 +61,6 @@ class ToolSchemaTest {
             UseSkillTool().schema,
             UnloadSkillTool().schema,
             SystemInfoTool().schema,
-            EarlyReplyTool().schema,
-            SendMessageTool().schema,
             WebSearchTool().schema,
             KnowledgeSearchTool().schema,
         ).associateBy { it.name }
@@ -119,13 +115,7 @@ class ToolSchemaTest {
         assertEquals(ToolRiskLevel.SAFE_READ, schemas.getValue("system_info").riskLevel)
         assertTrue(schemas.getValue("system_info").defaultEnabled)
 
-        assertEquals(ToolRiskLevel.SESSION_ACTION, schemas.getValue("early_reply").riskLevel)
-        assertEquals(listOf(ToolCapabilities.PLATFORM, ToolCapabilities.SESSION), schemas.getValue("early_reply").requiredCapabilities)
-        assertTrue(schemas.getValue("early_reply").auditLog)
 
-        assertEquals(ToolRiskLevel.SESSION_ACTION, schemas.getValue("send_message").riskLevel)
-        assertFalse(schemas.getValue("send_message").defaultEnabled)
-        assertTrue(schemas.getValue("send_message").auditLog)
 
         assertEquals(ToolRiskLevel.EXTERNAL_READ, schemas.getValue("web_search").riskLevel)
         assertEquals(listOf(ToolCapabilities.NETWORK, ToolCapabilities.PROVIDER_SEARCH), schemas.getValue("web_search").requiredCapabilities)

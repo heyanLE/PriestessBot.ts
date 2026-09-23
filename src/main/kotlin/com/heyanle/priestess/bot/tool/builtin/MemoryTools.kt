@@ -27,6 +27,7 @@ class MemorySaveTool(
         parameters = ToolParameters(
             properties = listOf(
                 ParameterDef("content", "string", "Memory content to save", required = true),
+                ParameterDef("library_id", "string", "Selected memory library to write; defaults to the configured write library or the only selected library"),
                 ParameterDef("type", "string", "Memory type", enumValues = MemoryType.entries.map { it.name.lowercase() }),
                 ParameterDef("scope", "string", "Memory scope", enumValues = MemoryScope.entries.map { it.name.lowercase() }),
                 ParameterDef("ttl_seconds", "string", "Optional time-to-live in seconds"),
@@ -49,6 +50,12 @@ class MemorySaveTool(
         val type = parseType(args["type"]) ?: return ToolResult.error("Unsupported memory type", "VALIDATION_ERROR")
         val scope = parseScope(args["scope"]) ?: return ToolResult.error("Unsupported memory scope", "VALIDATION_ERROR")
         memoryPolicyError(context, scope)?.let { return it }
+        val libraries = context.metadata.selectedMemoryLibraryIds()
+        val libraryId = args["library_id"]?.trim()?.takeIf { it.isNotBlank() }
+            ?: context.metadata["memoryWriteLibraryId"]?.trim()?.takeIf { it.isNotBlank() }
+            ?: if (libraries == null) "default" else libraries.singleOrNull()
+            ?: return ToolResult.error("Choose library_id from the selected memory libraries", "MEMORY_LIBRARY_REQUIRED")
+        memoryLibraryError(context, libraryId)?.let { return it }
         val ttlSeconds = args["ttl_seconds"]?.takeIf { it.isNotBlank() }?.toLongOrNull()
         if (args["ttl_seconds"]?.isNotBlank() == true && (ttlSeconds == null || ttlSeconds <= 0)) {
             return ToolResult.error("ttl_seconds must be a positive integer", "VALIDATION_ERROR")
@@ -66,8 +73,9 @@ class MemorySaveTool(
                 tags = tags,
                 confidence = confidence,
                 expiresAt = expiresAt,
+                libraryId = libraryId,
             )
-            ToolResult.success(json.encodeToString(MemorySaveResponse(memoryId = record.id, expiresAt = record.expiresAt)))
+            ToolResult.success(json.encodeToString(MemorySaveResponse(memoryId = record.id, expiresAt = record.expiresAt, libraryId = record.libraryId)))
         }.getOrElse {
             ToolResult.error(it.message ?: "Failed to save memory", "VALIDATION_ERROR")
         }
@@ -83,6 +91,7 @@ class MemoryRecallTool(
         parameters = ToolParameters(
             properties = listOf(
                 ParameterDef("query", "string", "Search query"),
+                ParameterDef("library_id", "string", "Optional selected memory library; omitted searches all selected libraries"),
                 ParameterDef("scope", "string", "Optional scope filter", enumValues = MemoryScope.entries.map { it.name.lowercase() }),
                 ParameterDef("type", "string", "Optional type filter", enumValues = MemoryType.entries.map { it.name.lowercase() }),
                 ParameterDef("limit", "string", "Maximum results, 1-20"),
@@ -106,11 +115,13 @@ class MemoryRecallTool(
             return ToolResult.error("Unsupported memory type", "VALIDATION_ERROR")
         }
         memoryPolicyError(context, scope)?.let { return it }
+        val libraryId = args["library_id"]?.trim()?.takeIf { it.isNotBlank() }
+        memoryLibraryError(context, libraryId)?.let { return it }
         val allowedScopes = context.metadata.memoryAllowedScopes()
         val results = memoryCaseProvider().search(
             MemorySearchQuery(
                 query = args["query"].orEmpty(),
-                scopeContext = context.toMemoryScopeContext(),
+                scopeContext = context.toMemoryScopeContext(libraryId),
                 scope = scope,
                 type = type,
                 limit = limit,
@@ -130,6 +141,7 @@ class MemoryDeleteTool(
         parameters = ToolParameters(
             properties = listOf(
                 ParameterDef("memory_id", "string", "Exact memory id to delete", required = true),
+                ParameterDef("library_id", "string", "Optional selected memory library to restrict the deletion"),
             ),
             required = listOf("memory_id"),
         ),
@@ -145,7 +157,9 @@ class MemoryDeleteTool(
             return ToolResult.error("memory_id is required", "VALIDATION_ERROR")
         }
         memoryPolicyError(context, null)?.let { return it }
-        val deleted = memoryCaseProvider().delete(id, context.toMemoryScopeContext())
+        val libraryId = args["library_id"]?.trim()?.takeIf { it.isNotBlank() }
+        memoryLibraryError(context, libraryId)?.let { return it }
+        val deleted = memoryCaseProvider().delete(id, context.toMemoryScopeContext(libraryId))
         if (!deleted) {
             return ToolResult.error("Memory not found or not visible", "NOT_FOUND")
         }
@@ -157,6 +171,7 @@ class MemoryDeleteTool(
 data class MemorySaveResponse(
     val memoryId: String,
     val expiresAt: Long? = null,
+    val libraryId: String = "default",
 )
 
 @Serializable
@@ -175,6 +190,7 @@ data class MemoryRecallItem(
     val score: Double,
     val matchReason: String,
     val expiresAt: Long? = null,
+    val libraryId: String = "default",
 )
 
 @Serializable
@@ -188,16 +204,18 @@ private val json = Json {
     ignoreUnknownKeys = true
 }
 
-private fun AgentToolContext.toMemoryScopeContext(): MemoryScopeContext {
+private fun AgentToolContext.toMemoryScopeContext(libraryId: String? = null): MemoryScopeContext {
     val metadata = this.metadata
     val platform = this.platform
     val session = this.session
     return MemoryScopeContext(
-        workspaceId = metadata["workspaceId"] ?: MemoryScopeContext.DEFAULT_WORKSPACE_ID,
-        platformId = metadata["platformId"] ?: platform?.metadata?.name,
+        workspaceId = if ("memoryLibraryIds" in metadata) "platform" else metadata["workspaceId"] ?: MemoryScopeContext.DEFAULT_WORKSPACE_ID,
+        platformId = metadata["platformId"] ?: platform?.metadata?.name ?: session?.platformName,
         sessionId = metadata["sessionId"] ?: session?.id,
-        userId = metadata["userId"],
+        userId = metadata["userId"] ?: metadata["senderId"] ?: session?.metadata?.get("userId") ?: session?.metadata?.get("senderId"),
         agentName = agentName.takeIf { it.isNotBlank() },
+        libraryIds = libraryId?.let(::setOf) ?: metadata.selectedMemoryLibraryIds(),
+        allowedScopes = metadata.memoryAllowedScopes()?.mapNotNull { value -> MemoryScope.entries.find { it.name == value } }?.toSet(),
     )
 }
 
@@ -210,6 +228,9 @@ private fun memoryPolicyError(context: AgentToolContext, scope: MemoryScope?): T
     if (!context.metadata.memoryEnabled()) {
         return ToolResult.error("Workspace memory policy is disabled", "WORKSPACE_MEMORY_DISABLED")
     }
+    if (context.metadata.selectedMemoryLibraryIds()?.isEmpty() == true) {
+        return ToolResult.error("No memory library is selected for this agent", "MEMORY_LIBRARY_DISABLED")
+    }
     val allowedScopes = context.metadata.memoryAllowedScopes()
     if (scope != null && allowedScopes != null && scope.name !in allowedScopes) {
         return ToolResult.error("Memory scope '${scope.name}' is not allowed by workspace policy", "WORKSPACE_MEMORY_SCOPE_DENIED")
@@ -217,21 +238,38 @@ private fun memoryPolicyError(context: AgentToolContext, scope: MemoryScope?): T
     return null
 }
 
+private fun Map<String, String>.selectedMemoryLibraryIds(): Set<String>? {
+    if ("memoryLibraryIds" !in this) return null
+    return getValue("memoryLibraryIds").split(',').map(String::trim).filter(String::isNotBlank).toSet()
+}
+
+private fun memoryLibraryError(context: AgentToolContext, requested: String?): ToolResult? {
+    val selected = context.metadata.selectedMemoryLibraryIds() ?: return null
+    if (selected.isEmpty()) return ToolResult.error("No memory library is selected for this agent", "MEMORY_LIBRARY_DISABLED")
+    if (requested != null && requested !in selected) {
+        return ToolResult.error("Memory library '$requested' is not selected for this agent", "MEMORY_LIBRARY_DENIED")
+    }
+    return null
+}
+
 private fun memoryPolicyLimit(context: AgentToolContext): Int {
-    return context.metadata["workspaceMemoryMaxInjected"]
+    return (context.metadata["workspaceMemoryMaxInjected"]
+        ?: context.metadata["workspace_memory_max_injected"])
         ?.toIntOrNull()
         ?.coerceIn(1, 20)
         ?: 5
 }
 
 private fun Map<String, String>.memoryEnabled(): Boolean {
-    return this["workspaceMemoryEnabled"]
+    return (this["workspaceMemoryEnabled"] ?: this["workspace_memory_enabled"])
         ?.toBooleanStrictOrNull()
         ?: true
 }
 
 private fun Map<String, String>.memoryAllowedScopes(): Set<String>? {
-    val raw = this["workspaceMemoryAllowedScopes"] ?: return null
+    val raw = this["workspaceMemoryAllowedScopes"]
+        ?: this["workspace_memory_allowed_scopes"]
+        ?: return null
     return raw.split(",")
         .map { it.trim().uppercase() }
         .filter { it.isNotBlank() }
@@ -264,5 +302,6 @@ private fun MemorySearchResult.toDto(): MemoryRecallItem {
         score = score,
         matchReason = matchReason,
         expiresAt = record.expiresAt,
+        libraryId = record.libraryId,
     )
 }

@@ -4,14 +4,13 @@
       <div class="workspace-hero-grid">
         <div class="workspace-copy">
           <div class="workspace-band">
-            <span>Changes</span>
-            <span>Workspaces</span>
+            <span>变更</span>
+            <span>工作区</span>
           </div>
 
-          <h2>Workspace snapshot registry</h2>
+          <h2>工作区快照列表</h2>
           <p>
-            Inspect runtime scopes, reload plans, and scoped resources before a workspace shifts
-            the effective runtime around the active agent.
+            在工作区影响当前智能体的生效配置前，检查运行范围、重载计划和限定资源。
           </p>
 
           <div class="grid workspace-signal-grid">
@@ -27,22 +26,22 @@
           <article class="card workspace-rail-card">
             <div class="section-title compact">
               <div>
-                <h3>What matters here</h3>
-                <p>Keep snapshot health, enabled coverage, and reload drift legible at a glance.</p>
+                <h3>检查重点</h3>
+                <p>快速确认快照健康状态、启用范围和重载差异。</p>
               </div>
             </div>
 
             <div class="rail-list">
               <div class="rail-item">
-                <span>Enabled workspaces</span>
+                <span>已启用工作区</span>
                 <strong>{{ enabledCount }}/{{ store.workspaces.workspaces.length }}</strong>
               </div>
               <div class="rail-item">
-                <span>Latest selection</span>
-                <strong>{{ detail?.status.name ?? 'Awaiting pick' }}</strong>
+                <span>当前选择</span>
+                <strong>{{ detail?.status.name ?? '等待选择' }}</strong>
               </div>
               <div class="rail-item">
-                <span>Reload posture</span>
+                <span>重载状态</span>
                 <strong>{{ reloadSummary }}</strong>
               </div>
             </div>
@@ -55,13 +54,13 @@
       <section class="panel registry-panel">
         <div class="section-title">
           <div>
-            <h2>Workspace roster</h2>
-            <p>{{ store.workspaces.workspaces.length }} configured runtime scope(s).</p>
+            <h2>工作区清单</h2>
+            <p>已配置 {{ store.workspaces.workspaces.length }} 个运行范围。</p>
           </div>
           <div class="toolbar">
-            <button type="button" @click="loadWorkspaces" :disabled="loading">Refresh</button>
+            <button type="button" @click="loadWorkspaces" :disabled="loading">刷新</button>
             <button type="button" class="primary" @click="reloadAll" :disabled="loading || reloadingId !== null">
-              Reload All
+              全部重载
             </button>
           </div>
         </div>
@@ -71,20 +70,20 @@
 
         <EmptyState
           v-if="store.workspaces.workspaces.length === 0"
-          title="No workspaces"
-          detail="Workspace status will appear after the backend publishes snapshots."
+          title="暂无工作区"
+          detail="后端发布快照后，工作区状态会显示在这里。"
         />
 
         <div v-else class="table-wrap workspace-table-wrap">
           <table class="table workspace-table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>State</th>
-                <th>Snapshot</th>
-                <th>Loaded</th>
-                <th>Last Reload</th>
-                <th>Action</th>
+                <th>名称</th>
+                <th>状态</th>
+                <th>快照</th>
+                <th>加载时间</th>
+                <th>最近重载</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -100,18 +99,18 @@
                   <p class="muted"><code>{{ workspace.id }}</code></p>
                 </td>
                 <td>
-                  <StatusDot :label="workspace.enabled ? 'Enabled' : 'Disabled'" :tone="workspace.enabled ? 'ok' : 'muted'" />
+                  <StatusDot :label="workspace.enabled ? '已启用' : '已禁用'" :tone="workspace.enabled ? 'ok' : 'muted'" />
                 </td>
-                <td>{{ workspace.activeSnapshotVersion ?? 'none' }}</td>
+                <td>{{ workspace.activeSnapshotVersion ?? '无' }}</td>
                 <td>{{ formatTime(workspace.loadedAt) }}</td>
                 <td>
                   <div class="reload-cell">
                     <StatusDot
                       v-if="workspace.lastReload"
-                      :label="workspace.lastReload.status"
+                      :label="reloadStatusLabel(workspace.lastReload.status)"
                       :tone="workspace.lastReload.success ? 'ok' : 'error'"
                     />
-                    <span v-else class="muted">none</span>
+                    <span v-else class="muted">无</span>
                     <p v-if="workspace.lastReload?.errorSummary" class="muted">{{ workspace.lastReload.errorSummary }}</p>
                   </div>
                 </td>
@@ -122,7 +121,7 @@
                     :disabled="reloadingId !== null"
                     @click.stop="reloadOne(workspace.id)"
                   >
-                    {{ reloadingId === workspace.id ? 'Reloading' : 'Reload' }}
+                    {{ reloadingId === workspace.id ? '重载中' : '重载' }}
                   </button>
                 </td>
               </tr>
@@ -134,31 +133,31 @@
       <aside class="panel detail-panel workspace-detail-rail">
         <div class="section-title">
           <div>
-            <h2>{{ detail?.status.name ?? 'Workspace detail rail' }}</h2>
-            <p v-if="detail">{{ detail.providerName }} snapshot {{ detail.status.activeSnapshotVersion ?? 'none' }}</p>
-            <p v-else>Select a workspace to inspect scoped resources and reload posture.</p>
+            <h2>{{ detail?.status.name ?? '工作区详情' }}</h2>
+            <p v-if="detail">{{ detail.providerName }} 快照 {{ detail.status.activeSnapshotVersion ?? '无' }}</p>
+            <p v-else>选择工作区以检查限定资源和重载状态。</p>
           </div>
         </div>
 
         <EmptyState
           v-if="!detail && !loadingDetail"
-          title="No workspace selected"
-          detail="Choose a workspace from the roster to inspect agents, tools, skills, MCP, personas, and memory policy."
+          title="未选择工作区"
+          detail="请选择工作区，以检查智能体、工具、技能、MCP、人格预设和记忆策略。"
         />
 
         <div v-if="detail" class="detail-stack">
           <article class="card workspace-rail-card">
             <div class="grid detail-stat-grid">
               <article class="detail-stat">
-                <span>Agents</span>
+                <span>智能体</span>
                 <strong>{{ detail.agents.length }}</strong>
               </article>
               <article class="detail-stat">
-                <span>Tools</span>
+                <span>工具</span>
                 <strong>{{ detail.tools.length }}</strong>
               </article>
               <article class="detail-stat">
-                <span>Skills</span>
+                <span>技能</span>
                 <strong>{{ detail.skills.length }}</strong>
               </article>
               <article class="detail-stat">
@@ -169,43 +168,43 @@
 
             <div class="detail-list">
               <div class="detail-item">
-                <span>Provider lane</span>
+                <span>模型服务</span>
                 <strong>{{ detail.providerName }}</strong>
               </div>
               <div class="detail-item">
-                <span>Memory enabled</span>
-                <strong>{{ detail.memory.enabled ? 'Enabled' : 'Disabled' }}</strong>
+                <span>记忆功能</span>
+                <strong>{{ detail.memory.enabled ? '已启用' : '已禁用' }}</strong>
               </div>
               <div class="detail-item">
-                <span>Max injected</span>
+                <span>最大注入数</span>
                 <strong>{{ detail.memory.maxInjectedMemories }}</strong>
               </div>
             </div>
           </article>
 
           <article class="card workspace-rail-card resource-card">
-            <h3>Agents</h3>
-            <ResourceList :items="detail.agents" empty-label="No scoped agents" />
+            <h3>智能体</h3>
+            <ResourceList :items="detail.agents" empty-label="没有限定智能体" />
           </article>
 
           <article class="card workspace-rail-card resource-card">
-            <h3>Tools</h3>
-            <ResourceList :items="detail.tools" empty-label="No scoped tools" />
+            <h3>工具</h3>
+            <ResourceList :items="detail.tools" empty-label="没有限定工具" />
           </article>
 
           <article class="card workspace-rail-card resource-card">
-            <h3>Skills</h3>
-            <ResourceList :items="detail.skills" empty-label="No scoped skills" />
+            <h3>技能</h3>
+            <ResourceList :items="detail.skills" empty-label="没有限定技能" />
             <div v-if="Object.keys(detail.skillSettings).length" class="resource-list">
               <span v-for="(settings, name) in detail.skillSettings" :key="name" class="chip">
-                {{ name }} settings {{ Object.keys(settings).length }}
+                {{ name }}：{{ Object.keys(settings).length }} 项设置
               </span>
             </div>
           </article>
 
           <article class="card workspace-rail-card resource-card">
             <h3>MCP</h3>
-            <ResourceList :items="detail.mcpServers" empty-label="No MCP servers" />
+            <ResourceList :items="detail.mcpServers" empty-label="没有 MCP 服务" />
             <div v-if="detail.mcpServerDetails.length" class="resource-list">
               <span v-for="server in detail.mcpServerDetails" :key="server.id" class="chip">
                 {{ server.id }} / {{ server.transport }}
@@ -214,31 +213,31 @@
           </article>
 
           <article class="card workspace-rail-card resource-card">
-            <h3>Personas</h3>
-            <ResourceList :items="detail.personas" empty-label="No personas" />
+            <h3>人格预设</h3>
+            <ResourceList :items="detail.personas" empty-label="没有人格预设" />
           </article>
 
           <article class="card workspace-rail-card resource-card">
-            <h3>Memory policy</h3>
-            <p>Scopes: {{ detail.memory.allowedScopes.join(', ') || 'none' }}</p>
-            <p>Knowledge bases: {{ detail.memory.knowledgeBaseIds.join(', ') || 'none' }}</p>
+            <h3>记忆策略</h3>
+            <p>范围：{{ detail.memory.allowedScopes.map(memoryScopeLabel).join(', ') || '无' }}</p>
+            <p>知识库：{{ detail.memory.knowledgeBaseIds.join(', ') || '无' }}</p>
           </article>
 
           <section v-if="detail.status.diagnostics.length" class="notice">
-            <strong>Diagnostics</strong>
+            <strong>诊断信息</strong>
             <ul>
               <li v-for="item in detail.status.diagnostics" :key="item">{{ item }}</li>
             </ul>
           </section>
 
           <section v-if="lastReload" class="notice" :class="{ error: !lastReload.success, ok: lastReload.success }">
-            <strong>Reload {{ lastReload.status }}</strong>
-            <p>Workspace {{ lastReload.workspaceId }} / snapshot {{ lastReload.snapshotVersion ?? 'unchanged' }}</p>
+            <strong>重载状态：{{ reloadStatusLabel(lastReload.status) }}</strong>
+            <p>工作区 {{ lastReload.workspaceId }} / 快照 {{ lastReload.snapshotVersion ?? '未变化' }}</p>
             <p v-if="lastReload.errorSummary">{{ lastReload.errorSummary }}</p>
             <div v-if="lastReload.plan" class="reload-plan">
-              <span>Added {{ lastReload.plan.added.length }}</span>
-              <span>Removed {{ lastReload.plan.removed.length }}</span>
-              <span>Modified {{ lastReload.plan.modified.length }}</span>
+              <span>新增 {{ lastReload.plan.added.length }}</span>
+              <span>移除 {{ lastReload.plan.removed.length }}</span>
+              <span>修改 {{ lastReload.plan.modified.length }}</span>
             </div>
           </section>
         </div>
@@ -274,36 +273,36 @@ const failingReloadCount = computed(
 
 const workspaceSignals = computed(() => [
   {
-    label: 'Scopes',
+    label: '范围',
     value: String(store.workspaces.workspaces.length),
-    detail: 'Runtime workspace scopes currently published by the backend.',
+    detail: '后端当前发布的运行时工作区范围。',
     tone: store.workspaces.workspaces.length > 0 ? 'ok' : 'muted',
   },
   {
-    label: 'Enabled',
+    label: '已启用',
     value: String(enabledCount.value),
-    detail: `${store.workspaces.workspaces.length - enabledCount.value} scope(s) are parked.`,
+    detail: `${store.workspaces.workspaces.length - enabledCount.value} 个范围已停用。`,
     tone: enabledCount.value > 0 ? 'ok' : 'warn',
   },
   {
-    label: 'Failures',
+    label: '失败',
     value: String(failingReloadCount.value),
-    detail: failingReloadCount.value > 0 ? 'Latest reload faults require review.' : 'No failed reloads in the visible roster.',
+    detail: failingReloadCount.value > 0 ? '最近的重载故障需要检查。' : '当前列表中没有重载失败。',
     tone: failingReloadCount.value > 0 ? 'warn' : 'ok',
   },
   {
-    label: 'Selected',
-    value: detail.value?.status.name ?? 'None',
-    detail: detail.value ? 'Current detail rail focus for scope diagnostics.' : 'Pick a scope to inspect resources.',
+    label: '已选择',
+    value: detail.value?.status.name ?? '无',
+    detail: detail.value ? '当前详情面板中的工作区诊断范围。' : '请选择范围以检查资源。',
     tone: detail.value ? 'muted' : 'muted',
   },
 ]);
 
 const reloadSummary = computed(() => {
-  if (reloadingId.value === '*') return 'Reloading all workspace scopes';
-  if (reloadingId.value) return `Reloading ${reloadingId.value}`;
-  if (failingReloadCount.value > 0) return `${failingReloadCount.value} failed reload(s) visible`;
-  return 'No active reload faults';
+  if (reloadingId.value === '*') return '正在重载全部工作区';
+  if (reloadingId.value) return `正在重载 ${reloadingId.value}`;
+  if (failingReloadCount.value > 0) return `有 ${failingReloadCount.value} 个重载失败`;
+  return '没有重载故障';
 });
 
 const ResourceList = defineComponent({
@@ -362,7 +361,7 @@ async function reloadOne(id: string) {
   error.value = '';
   try {
     lastReload.value = await store.reloadWorkspace(id);
-    notice.value = lastReload.value.success ? `Reloaded ${id}.` : '';
+    notice.value = lastReload.value.success ? `已重载 ${id}。` : '';
     await loadDetail();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
@@ -379,8 +378,8 @@ async function reloadAll() {
     const results = await store.reloadWorkspaces();
     const failed = results.filter((result) => !result.success);
     lastReload.value = results.find((result) => result.workspaceId === selectedWorkspaceId.value) ?? results[0] ?? null;
-    notice.value = failed.length === 0 ? `Reloaded ${results.length} workspace(s).` : '';
-    if (failed.length > 0) error.value = `${failed.length} workspace reload(s) failed.`;
+    notice.value = failed.length === 0 ? `已重载 ${results.length} 个工作区。` : '';
+    if (failed.length > 0) error.value = `${failed.length} 个工作区重载失败。`;
     await loadDetail();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
@@ -390,8 +389,30 @@ async function reloadAll() {
 }
 
 function formatTime(value?: number) {
-  if (!value) return 'not loaded';
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(value);
+  if (!value) return '未加载';
+  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(value);
+}
+
+function reloadStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    SUCCESS: '成功',
+    FAILED: '失败',
+    ERROR: '错误',
+    RELOADED: '已重载',
+    UNCHANGED: '未变化',
+  };
+  return labels[status] ?? status;
+}
+
+function memoryScopeLabel(scope: string) {
+  const labels: Record<string, string> = {
+    GLOBAL: '全局',
+    PLATFORM: '平台',
+    SESSION: '会话',
+    USER: '用户',
+    AGENT: '智能体',
+  };
+  return labels[scope] ?? scope;
 }
 
 watch(selectedWorkspace, () => void loadDetail());

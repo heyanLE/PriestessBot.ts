@@ -1,14 +1,6 @@
 package com.heyanle.priestess.bot.server
 
 import com.heyanle.priestess.bot.agent.AgentCase
-import com.heyanle.priestess.bot.agent.AgentContext
-import com.heyanle.priestess.bot.agent.AgentHooks
-import com.heyanle.priestess.bot.agent.AgentResponse
-import com.heyanle.priestess.bot.agent.orchestration.SubAgentOrchestrator
-import com.heyanle.priestess.bot.agent.orchestration.SubAgentRunEvent
-import com.heyanle.priestess.bot.config.ConfigCase
-import com.heyanle.priestess.bot.config.ConfigBackup
-import com.heyanle.priestess.bot.config.PriestessConfig
 import com.heyanle.priestess.bot.conversation.ConversationCase
 import com.heyanle.priestess.bot.knowledge.KnowledgeCase
 import com.heyanle.priestess.bot.memory.MemoryCase
@@ -17,13 +9,18 @@ import com.heyanle.priestess.bot.memory.MemoryScopeContext
 import com.heyanle.priestess.bot.memory.MemorySearchQuery
 import com.heyanle.priestess.bot.observability.ObservabilityCase
 import com.heyanle.priestess.bot.persona.PersonaCase
-import com.heyanle.priestess.bot.persona.PersonaMemoryInjection
-import com.heyanle.priestess.bot.persona.PersonaMemoryInjectionContext
-import com.heyanle.priestess.bot.persona.PersonaMemoryInjector
 import com.heyanle.priestess.bot.persona.PersonaUpsertRequest
+import com.heyanle.priestess.bot.pipeline.PipelineCase
 import com.heyanle.priestess.bot.plugin.PluginCase
+import com.heyanle.priestess.bot.platform.MessageChain
+import com.heyanle.priestess.bot.platform.MessageEvent
+import com.heyanle.priestess.bot.platform.MessageSession
+import com.heyanle.priestess.bot.platform.Platform
+import com.heyanle.priestess.bot.platform.PlatformMetadata
 import com.heyanle.priestess.bot.platform.PlatformCase
-import com.heyanle.priestess.bot.provider.model.ConversationMessage
+import com.heyanle.priestess.bot.platform.SessionType
+import com.heyanle.priestess.bot.platform.adapters.weixin.WeixinQrLoginService
+import com.heyanle.priestess.bot.platform.adapters.weixin.WeixinQrLoginView
 import com.heyanle.priestess.bot.provider.ProviderCase
 import com.heyanle.priestess.bot.tool.ToolCase
 import com.heyanle.priestess.bot.tool.ToolListingFilters
@@ -32,12 +29,12 @@ import com.heyanle.priestess.bot.workspace.WorkspaceMemoryPolicyConfig
 import com.heyanle.priestess.bot.workspace.WorkspaceSnapshot
 import com.heyanle.priestess.bot.workspace.WorkspaceStatus
 import java.util.UUID
+import kotlinx.coroutines.Job
 
 /**
  * 仪表盘应用服务，负责把 HTTP 路由请求转换为各业务模块的门面调用。
  */
 class DashboardService(
-    private val configCase: ConfigCase,
     private val platformCase: PlatformCase,
     private val providerCase: ProviderCase,
     private val toolCase: ToolCase,
@@ -45,66 +42,51 @@ class DashboardService(
     private val pluginCase: PluginCase,
     private val agentCase: AgentCase,
     private val knowledgeCase: KnowledgeCase,
-    private val subAgentOrchestrator: SubAgentOrchestrator,
     private val observabilityCase: ObservabilityCase,
     private val healthProvider: RuntimeHealthProvider,
-    private val workspaceCase: WorkspaceCase? = null,
+    private val workspaceCase: WorkspaceCase,
     private val personaCase: PersonaCase? = null,
     private val memoryCase: MemoryCase? = null,
-    private val personaMemoryInjector: PersonaMemoryInjector? = null,
+    private val configurationManagement: ConfigurationManagementService? = null,
+    private val pipelineCase: PipelineCase,
+    private val weixinQrLoginService: WeixinQrLoginService? = null,
+    val applicationManagement: ApplicationManagementService? = null,
+    val agentSkillCatalog: com.heyanle.priestess.bot.resources.AgentSkillCatalog? = null,
+    val executionTraces: com.heyanle.priestess.bot.observability.trace.ExecutionTraceController? = null,
 ) {
     fun health(): HealthResponse = healthProvider.snapshot()
 
     fun metrics(): String = observabilityCase.renderPrometheus()
 
-    fun config(): PriestessConfig = configCase.current()
+    fun rawV2Configuration(): RawGlobalConfigurationResponse = requireConfigurationManagement().raw()
 
-    fun replaceConfig(config: PriestessConfig): PriestessConfig = configCase.replace(config)
+    fun rawV2Workspace(id: String): RawWorkspaceConfigurationResponse = requireConfigurationManagement().rawWorkspace(id)
 
-    fun reloadConfig(): PriestessConfig = configCase.reload()
+    fun effectiveV2Configuration(): EffectiveConfigurationResponse? = requireConfigurationManagement().effective()
 
-    fun configBackups(): List<ConfigBackup> = configCase.listBackups()
+    fun previewV2Configuration(request: ConfigurationContentRequest) = requireConfigurationManagement().preview(request)
 
-    fun restoreConfigBackup(id: String): PriestessConfig = configCase.restoreBackup(id)
+    fun previewV2Workspace(id: String, request: ConfigurationContentRequest) =
+        requireConfigurationManagement().previewWorkspace(id, request)
 
-    fun databaseConfigLayer(): DatabaseConfigLayerResponse {
-        return DatabaseConfigLayerResponse(
-            config = configCase.current(),
-            diagnostics = listOf("Using in-memory config (no database config layer active)"),
-        )
-    }
+    fun applyV2Configuration(request: ConfigurationApplyRequest) = requireConfigurationManagement().apply(request)
 
-    fun environmentOverrideSummary(): EnvironmentOverrideSummaryResponse {
-        val envVarDefinitions = listOf(
-            Triple("PRIESTESS_SERVER_ENABLED", "server.enabled", false),
-            Triple("PRIESTESS_SERVER_HOST", "server.host", false),
-            Triple("PRIESTESS_SERVER_PORT", "server.port", false),
-            Triple("PRIESTESS_SERVER_CORS_ENABLED", "server.corsEnabled", false),
-            Triple("PRIESTESS_CONFIG_WATCH_ENABLED", "server.configWatchEnabled", false),
-            Triple("PRIESTESS_CONFIG_WATCH_INTERVAL_MILLIS", "server.configWatchIntervalMillis", false),
-            Triple("PRIESTESS_SERVER_API_TOKEN", "server.apiToken", true),
-            Triple("PRIESTESS_DATABASE_PATH", "database.path", false),
-            Triple("PRIESTESS_PLUGINS_ENABLED", "plugins.enabled", false),
-            Triple("PRIESTESS_PLUGINS_DIRECTORY", "plugins.directory", false),
-            Triple("PRIESTESS_PLUGINS_AUTO_DISCOVER", "plugins.autoDiscover", false),
-            Triple("PRIESTESS_WORKSPACE_DEFAULT_DIR", "workspace.defaultDir", false),
-        )
-        val overrides = envVarDefinitions.mapNotNull { (envKey, path, sensitive) ->
-            val value = System.getenv(envKey)?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            EnvironmentOverrideSummaryDto(
-                path = path,
-                envKey = envKey,
-                summary = if (sensitive) "***" else value,
-                sensitive = sensitive,
-            )
-        }
-        return EnvironmentOverrideSummaryResponse(overrides = overrides)
+    fun applyV2Workspace(id: String, request: ConfigurationApplyRequest) =
+        requireConfigurationManagement().applyWorkspace(id, request)
+
+    fun reloadV2Configuration() = requireConfigurationManagement().reload()
+    fun configBackups() = requireConfigurationManagement().backups()
+    fun restoreConfigBackup(id: String) = requireConfigurationManagement().restoreBackup(id)
+
+    private fun requireConfigurationManagement(): ConfigurationManagementService = checkNotNull(configurationManagement) {
+        "The v2 configuration runtime is not installed"
     }
 
     fun workingDirectorySummary(): WorkingDirectorySummaryResponse {
-        val config = configCase.current()
-        val configuredPath = config.workspace.defaultDir
-        val effectivePath = configuredPath.ifBlank { System.getProperty("user.dir") ?: "." }
+        val defaultId = rawV2Configuration().document?.workspaces?.defaultWorkspaceId
+            ?: throw IllegalStateException("Global Workspace catalog is unavailable")
+        val configuredPath = workspaceCase.get(defaultId)?.rootDir.orEmpty()
+        val effectivePath = configuredPath.ifBlank { "." }
         val dir = java.io.File(effectivePath)
         val exists = dir.exists() && dir.isDirectory
 
@@ -152,80 +134,46 @@ class DashboardService(
         )
     }
 
-    fun updateWorkingDirectory(request: WorkingDirectoryUpdateRequest): WorkingDirectorySummaryResponse {
-        configCase.update { current ->
-            current.copy(workspace = current.workspace.copy(defaultDir = request.path))
-        }.also { configCase.save(it) }
-        return workingDirectorySummary()
-    }
-
-    fun effectiveRuntimePreview(request: EffectiveRuntimePreviewRequest): EffectiveRuntimePreviewResponse {
-        val config = configCase.current()
-        val workdirPath = request.workdirPath ?: config.workspace.defaultDir
-
-        val workingDir = if (request.workdirPath != null) {
-            val dir = java.io.File(request.workdirPath)
-            val exists = dir.exists() && dir.isDirectory
-            WorkingDirectorySummaryResponse(
-                configuredPath = request.workdirPath,
-                effectivePath = request.workdirPath,
-                valid = exists,
-                exists = exists,
-                diagnostics = if (!exists) listOf("Directory does not exist: ${request.workdirPath}") else emptyList(),
-            )
-        } else {
-            workingDirectorySummary()
-        }
-
-        val memoryPolicy = com.heyanle.priestess.bot.workspace.WorkspaceMemoryPolicyConfig()
-
-        val trace = mutableListOf<EffectiveValueTraceDto>(
-            EffectiveValueTraceDto(
-                path = "config",
-                summary = "Loaded from ${configCase.configPath()}",
-                source = "file",
-            ),
-        )
-        if (request.agent != null) {
-            trace.add(EffectiveValueTraceDto(path = "agent", summary = "Preview agent: ${request.agent.name}", source = "preview"))
-        }
-        if (request.providerName != null) {
-            trace.add(EffectiveValueTraceDto(path = "provider", summary = "Preview provider: ${request.providerName}", source = "preview"))
-        }
-
-        return EffectiveRuntimePreviewResponse(
-            config = if (request.agent != null) config.copy(agent = request.agent) else config,
-            workingDirectory = workingDir,
-            memoryPolicy = memoryPolicy,
-            trace = trace,
-        )
-    }
-
     fun platforms(): List<PlatformStatusDto> {
         val running = platformCase.runningPlatformNames()
-        return configCase.current().platforms.map { cfg ->
+        return requireNotNull(effectiveV2Configuration()).platforms.values.map { cfg ->
             PlatformStatusDto(
-                name = cfg.name.ifBlank { cfg.type },
+                name = cfg.id,
                 type = cfg.type,
                 enabled = cfg.enabled,
-                running = (cfg.name.ifBlank { cfg.type }) in running || cfg.type in running,
-                host = cfg.host,
-                port = cfg.port,
-                wsPort = cfg.wsPort,
+                running = cfg.id in running || cfg.type in running,
+                host = cfg.settings["host"].orEmpty(),
+                port = cfg.settings["port"]?.toIntOrNull() ?: 0,
+                wsPort = cfg.settings["wsPort"]?.toIntOrNull() ?: 0,
             )
         }
     }
 
-    fun setPlatformEnabled(name: String, enabled: Boolean): PriestessConfig {
-        return configCase.update { current ->
-            current.copy(
-                platforms = current.platforms.map { cfg ->
-                    val cfgName = cfg.name.ifBlank { cfg.type }
-                    if (cfgName == name || cfg.type == name) cfg.copy(enabled = enabled) else cfg
-                },
-            )
-        }.also { configCase.save(it) }
+    suspend fun startWeixinQrLogin(platformId: String): WeixinQrLoginDto =
+        requireWeixinQrLoginService().start(platformId).toDto()
+
+    fun weixinQrLoginStatus(platformId: String, sessionId: String): WeixinQrLoginDto =
+        requireWeixinQrLoginService().status(platformId, sessionId).toDto()
+
+    suspend fun cancelWeixinQrLogin(platformId: String, sessionId: String): WeixinQrLoginDto =
+        requireWeixinQrLoginService().cancel(platformId, sessionId).toDto()
+
+    private fun requireWeixinQrLoginService(): WeixinQrLoginService = checkNotNull(weixinQrLoginService) {
+        "Weixin QR login service is not installed"
     }
+
+    private fun WeixinQrLoginView.toDto() = WeixinQrLoginDto(
+        sessionId = sessionId,
+        platformId = platformId,
+        status = status.name,
+        qrImageDataUrl = qrImageDataUrl,
+        qrRevision = qrRevision,
+        expiresAtEpochMillis = expiresAtEpochMillis,
+        pollAfterMillis = pollAfterMillis,
+        message = message,
+        accountId = accountId,
+        platformRunning = platformRunning,
+    )
 
     fun providers(): List<ProviderDto> {
         return providerCase.getMetaList().map { meta ->
@@ -256,18 +204,17 @@ class DashboardService(
                 defaultEnabled = listing.defaultEnabled,
                 effectiveEnabled = listing.effectiveEnabled,
                 auditLog = listing.auditLog,
+                requiredPermissionGroup = tool.schema.requiredPermissionGroup,
                 statusReason = listing.statusReason,
             )
         }
     }
 
     fun workspaces(): WorkspaceListResponse {
-        val workspaceCase = requireWorkspaceCase()
         return WorkspaceListResponse(workspaceCase.list().map { it.toDto() })
     }
 
     fun workspaceDetail(id: String): WorkspaceDetailDto {
-        val workspaceCase = requireWorkspaceCase()
         val snapshot = workspaceCase.get(id) ?: throw NoSuchElementException("Workspace '$id' not found")
         val status = workspaceCase.list().firstOrNull { it.id == id }
             ?: WorkspaceStatus(
@@ -282,11 +229,11 @@ class DashboardService(
     }
 
     fun reloadWorkspace(id: String): com.heyanle.priestess.bot.workspace.WorkspaceReloadResult {
-        return requireWorkspaceCase().reload(id)
+        return workspaceCase.reload(id)
     }
 
     fun reloadWorkspaces(): List<com.heyanle.priestess.bot.workspace.WorkspaceReloadResult> {
-        return requireWorkspaceCase().reloadAll()
+        return workspaceCase.reloadAll()
     }
 
     fun workspaceTools(id: String): WorkspaceResourceListResponse {
@@ -314,19 +261,21 @@ class DashboardService(
     }
 
     fun personas(workspaceId: String): PersonaListResponse {
-        return PersonaListResponse(requirePersonaCase().list(workspaceId.ifBlank { "default" }))
+        return PersonaListResponse(requirePersonaCase().list(if (applicationManagement != null) "platform" else workspaceId.ifBlank { "default" }))
     }
 
     fun upsertPersona(request: PersonaUpsertDto): com.heyanle.priestess.bot.persona.Persona {
+        if (!request.enabled && request.id != null) applicationManagement?.requirePersonaUnbound(request.id)
         return requirePersonaCase().upsert(
             PersonaUpsertRequest(
                 id = request.id,
-                workspaceId = request.workspaceId,
+                workspaceId = if (applicationManagement != null) "platform" else request.workspaceId,
                 name = request.name,
                 description = request.description,
                 tone = request.tone,
                 boundaries = request.boundaries,
                 systemPromptTemplate = request.systemPromptTemplate,
+                exampleDialogs = request.exampleDialogs,
                 enabled = request.enabled,
                 agentNames = request.agentNames,
                 errorMessages = request.errorMessages,
@@ -335,10 +284,12 @@ class DashboardService(
     }
 
     fun deletePersona(id: String): DeleteResponse {
+        applicationManagement?.requirePersonaUnbound(id)
         return DeleteResponse(requirePersonaCase().delete(id))
     }
 
     fun resolvePersona(request: PersonaResolveRequest): PersonaResolveResponse {
+        applicationManagement?.let { return PersonaResolveResponse(it.personaForAgent(request.agentName)) }
         return PersonaResolveResponse(
             requirePersonaCase().resolve(
                 workspaceId = request.workspaceId.ifBlank { "default" },
@@ -486,120 +437,7 @@ class DashboardService(
     }
 
     suspend fun chatAgent(request: AgentChatRequest): AgentChatResponse {
-        val agentConfig = request.config ?: configCase.current().agent
-        val conversationId = request.conversationId?.takeIf { it.isNotBlank() }
-            ?: "dashboard-${UUID.randomUUID()}"
-        val events = mutableListOf<AgentChatEventDto>()
-        val workspaceId = request.workspaceId.ifBlank { "default" }
-        val injection = injectPersonaMemory(agentConfig, request, workspaceId)
-        val injectionTrace = injection.toAgentChatTrace(workspaceId)
-
-        if (request.message.isBlank()) {
-            return AgentChatResponse(
-                status = "ERROR",
-                content = "Message must not be blank",
-                events = events,
-                providerName = agentConfig.providerName,
-                model = agentConfig.model,
-                conversationId = conversationId,
-                injectionTrace = injectionTrace,
-            )
-        }
-
-        val provider = providerCase.getByName(agentConfig.providerName)
-        if (provider == null) {
-            return AgentChatResponse(
-                status = "ERROR",
-                content = "Provider '${agentConfig.providerName}' is not available",
-                events = events,
-                providerName = agentConfig.providerName,
-                model = agentConfig.model,
-                conversationId = conversationId,
-                injectionTrace = injectionTrace,
-            )
-        }
-
-        val baseAgent = agentCase.createAgent(agentConfig)
-        val agent = if (injection != null && injection.hasContent) {
-            baseAgent.copy(instructions = injection.instructions)
-        } else {
-            baseAgent
-        }
-        val context = AgentContext(
-            agent = agent,
-            conversationId = conversationId,
-            platform = null,
-            session = null,
-            messages = mutableListOf(ConversationMessage.user(request.message)),
-            metadata = mapOf("workspaceId" to workspaceId) + (injection?.metadata ?: emptyMap()),
-        )
-        val hooks = object : AgentHooks {
-            override suspend fun onAgentBegin(context: AgentContext) {
-                events += AgentChatEventDto(type = "agent_begin", message = "Agent started")
-            }
-
-            override suspend fun onToolStart(context: AgentContext, toolName: String, arguments: String) {
-                events += AgentChatEventDto(
-                    type = "tool_start",
-                    message = arguments,
-                    toolName = toolName,
-                )
-            }
-
-            override suspend fun onToolEnd(context: AgentContext, toolName: String, result: AgentResponse.ToolExecuted) {
-                events += AgentChatEventDto(
-                    type = "tool_end",
-                    message = if (result.toolResult.success) result.toolResult.output else result.toolResult.error,
-                    toolName = toolName,
-                    success = result.toolResult.success,
-                    errorCode = result.toolResult.errorCode,
-                    policyDenialCode = result.toolResult.policyDenialCode?.name,
-                )
-            }
-
-            override suspend fun onAgentDone(context: AgentContext, response: AgentResponse.Final) {
-                events += AgentChatEventDto(type = "agent_done", message = "Agent completed")
-            }
-
-            override suspend fun onAgentError(context: AgentContext, error: AgentResponse.Error) {
-                events += AgentChatEventDto(type = "agent_error", message = error.message, success = false)
-            }
-        }
-
-        return when (val response = agentCase.runWithProvider(
-            context = context,
-            provider = provider,
-            toolCase = toolCase,
-            hooks = hooks,
-        )) {
-            is AgentResponse.Final -> AgentChatResponse(
-                status = "FINAL",
-                content = response.content,
-                events = events,
-                providerName = agentConfig.providerName,
-                model = agentConfig.model,
-                conversationId = conversationId,
-                injectionTrace = injectionTrace,
-            )
-            is AgentResponse.Error -> AgentChatResponse(
-                status = "ERROR",
-                content = response.message,
-                events = events,
-                providerName = agentConfig.providerName,
-                model = agentConfig.model,
-                conversationId = conversationId,
-                injectionTrace = injectionTrace,
-            )
-            else -> AgentChatResponse(
-                status = "ERROR",
-                content = "Agent ended before producing a final response",
-                events = events,
-                providerName = agentConfig.providerName,
-                model = agentConfig.model,
-                conversationId = conversationId,
-                injectionTrace = injectionTrace,
-            )
-        }
+        return chatAgentThroughPipeline(request)
     }
 
     fun knowledgeBases(): KnowledgeBaseListResponse {
@@ -620,53 +458,111 @@ class DashboardService(
             .map { KnowledgeSearchResultDto(it.chunk, it.score) }
     }
 
-    fun subAgentConfig(): com.heyanle.priestess.bot.config.SubAgentOrchestrationConfig {
-        return configCase.current().subAgents
-    }
-
-    fun replaceSubAgentConfig(config: com.heyanle.priestess.bot.config.SubAgentOrchestrationConfig): com.heyanle.priestess.bot.config.SubAgentOrchestrationConfig {
-        return configCase.update { current ->
-            current.copy(subAgents = config)
-        }.also { configCase.save(it) }.subAgents
-    }
-
     suspend fun testSubAgent(request: SubAgentTestRequest): SubAgentTestResponse {
-        val config = request.config ?: configCase.current().subAgents
-        val result = subAgentOrchestrator.run(
-            message = request.message,
-            primaryAgent = configCase.current().agent,
-            config = config,
-            conversationId = request.conversationId?.takeIf { it.isNotBlank() } ?: "dashboard-${UUID.randomUUID()}",
+        return testSubAgentThroughPipeline(request)
+    }
+
+    private suspend fun chatAgentThroughPipeline(request: AgentChatRequest): AgentChatResponse {
+        if (request.message.isBlank()) {
+            return AgentChatResponse(
+                status = "ERROR",
+                content = "Message must not be blank",
+                events = emptyList(),
+                providerName = "",
+                model = "",
+                conversationId = request.conversationId.orEmpty(),
+            )
+        }
+        val conversationId = request.conversationId?.takeIf(String::isNotBlank) ?: "dashboard-${UUID.randomUUID()}"
+        val execution = pipelineCase.processAndAwait(
+            dashboardEvent(
+                message = request.message,
+                workspaceId = request.workspaceId,
+                platformId = request.platformId,
+                sessionId = request.sessionId ?: conversationId,
+                userId = request.userId,
+                agentId = request.agentId,
+            ),
+        )
+        val trace = execution.trace
+        return AgentChatResponse(
+            status = execution.status,
+            content = execution.content.ifBlank { execution.error.orEmpty() },
+            events = emptyList(),
+            providerName = trace?.providerId.orEmpty(),
+            model = trace?.model.orEmpty(),
+            conversationId = conversationId,
+            selectedAgentName = execution.selectedAgentId,
+            selectedRouteName = execution.selectedRouteId,
+            selectionReason = execution.selectionReason,
+            runtimeVersion = trace?.effectiveVersion,
+            workspaceVersion = trace?.workspaceVersion,
+            toolIds = trace?.toolIds.orEmpty(),
+        )
+    }
+
+    private suspend fun testSubAgentThroughPipeline(request: SubAgentTestRequest): SubAgentTestResponse {
+        val conversationId = request.conversationId?.takeIf(String::isNotBlank) ?: "dashboard-${UUID.randomUUID()}"
+        val execution = pipelineCase.processAndAwait(
+            dashboardEvent(
+                message = request.message,
+                workspaceId = request.workspaceId,
+                platformId = request.platformId,
+                sessionId = request.sessionId ?: conversationId,
+                userId = request.userId,
+            ),
         )
         return SubAgentTestResponse(
-            status = result.status,
-            content = result.content,
-            selectedAgentName = result.selection.agentName,
-            selectedRouteName = result.selection.routeName,
-            selectionReason = result.selection.reason,
-            events = result.events.map { it.toAgentChatEventDto() },
-            conversationId = result.conversationId,
+            status = execution.status,
+            content = execution.content.ifBlank { execution.error.orEmpty() },
+            selectedAgentName = execution.selectedAgentId.orEmpty(),
+            selectedRouteName = execution.selectedRouteId,
+            selectionReason = execution.selectionReason.orEmpty(),
+            events = emptyList(),
+            conversationId = conversationId,
+            providerName = execution.trace?.providerId,
+            model = execution.trace?.model,
+            runtimeVersion = execution.trace?.effectiveVersion,
+            workspaceVersion = execution.trace?.workspaceVersion,
+            toolIds = execution.trace?.toolIds.orEmpty(),
         )
     }
 
-    private fun SubAgentRunEvent.toAgentChatEventDto(): AgentChatEventDto {
-        return AgentChatEventDto(
-            type = type,
-            message = message,
-            toolName = toolName,
-            success = success,
-            errorCode = errorCode,
-            policyDenialCode = policyDenialCode,
-            timestamp = timestamp,
+    private fun dashboardEvent(
+        message: String,
+        workspaceId: String,
+        platformId: String?,
+        sessionId: String,
+        userId: String?,
+        agentId: String? = null,
+    ): MessageEvent {
+        val resolvedPlatformId = platformId?.takeIf(String::isNotBlank) ?: "dashboard"
+        val platform = DashboardPipelinePlatform(resolvedPlatformId)
+        return MessageEvent(
+            platform = platform,
+            session = MessageSession(
+                id = sessionId,
+                type = SessionType.PRIVATE,
+                platformName = resolvedPlatformId,
+                metadata = mapOf(
+                    "workspaceId" to workspaceId,
+                    "senderId" to (userId?.takeIf(String::isNotBlank) ?: sessionId),
+                ) + (agentId?.let { mapOf("agentId" to it) } ?: emptyMap()),
+            ),
+            chain = MessageChain.text(message),
+            messageId = "dashboard-${UUID.randomUUID()}",
         )
     }
 
-    private fun requireWorkspaceCase(): WorkspaceCase {
-        return workspaceCase ?: throw IllegalStateException("Workspace runtime is not available")
+    private class DashboardPipelinePlatform(id: String) : Platform() {
+        override val metadata = PlatformMetadata(id, "Dashboard", false, false)
+        override suspend fun run(): Job = Job()
+        override suspend fun terminate() = Unit
+        override suspend fun sendMessage(session: MessageSession, chain: MessageChain): String = "dashboard"
     }
 
     private fun requireWorkspaceSnapshot(id: String): WorkspaceSnapshot {
-        return requireWorkspaceCase().get(id)
+        return workspaceCase.get(id)
             ?: throw NoSuchElementException("Workspace '$id' not found")
     }
 
@@ -676,55 +572,6 @@ class DashboardService(
 
     private fun requireMemoryCase(): MemoryCase {
         return memoryCase ?: throw IllegalStateException("Memory runtime is not available")
-    }
-
-    private fun injectPersonaMemory(
-        agentConfig: com.heyanle.priestess.bot.config.AgentConfig,
-        request: AgentChatRequest,
-        workspaceId: String,
-    ): PersonaMemoryInjection? {
-        val injector = personaMemoryInjector ?: return null
-        val maxMemories = workspaceCase
-            ?.get(workspaceId)
-            ?.memoryPolicy
-            ?.maxInjectedMemories
-            ?: 3
-        return runCatching {
-            injector.inject(
-                baseInstructions = agentConfig.instructions,
-                context = PersonaMemoryInjectionContext(
-                    workspaceId = workspaceId,
-                    agentName = agentConfig.name,
-                    platformId = request.platformId,
-                    sessionId = request.sessionId,
-                    userId = request.userId,
-                    message = request.message,
-                    maxMemories = maxMemories,
-                ),
-            )
-        }.getOrNull()
-    }
-
-    private fun PersonaMemoryInjection?.toAgentChatTrace(workspaceId: String): AgentChatInjectionTraceDto {
-        if (this == null) {
-            return AgentChatInjectionTraceDto(workspaceId = workspaceId)
-        }
-        return AgentChatInjectionTraceDto(
-            workspaceId = workspaceId,
-            personaId = persona?.id,
-            personaName = persona?.name,
-            memoryCount = memories.size,
-            memories = memories.map { result ->
-                AgentChatInjectedMemoryDto(
-                    id = result.record.id,
-                    type = result.record.type,
-                    score = result.score,
-                    matchReason = result.matchReason,
-                    contentPreview = result.record.content.trim().take(160),
-                )
-            },
-            metadata = metadata,
-        )
     }
 
     private fun MemorySaveRequest.toScopeContext(): MemoryScopeContext {
@@ -763,7 +610,7 @@ class DashboardService(
         return WorkspaceDetailDto(
             status = status.toDto(),
             providerName = providerName,
-            agents = agentConfigs.map { it.name },
+            agents = agentIds,
             tools = toolNames,
             skills = skillNames,
             skillSettings = skillSettings,

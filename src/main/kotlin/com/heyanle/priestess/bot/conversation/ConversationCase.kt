@@ -7,8 +7,8 @@ class ConversationCase(
     private val controller: ConversationController,
     private val history: MessageHistory,
 ) {
-    fun getOrCreate(platform: String, sessionId: String): Conversation {
-        return controller.getOrCreate(platform, sessionId)
+    fun getOrCreate(platform: String, sessionId: String, agentId: String = ""): Conversation {
+        return controller.getOrCreate(platform, sessionId, agentId)
     }
 
     fun updateActivity(id: String) {
@@ -25,7 +25,7 @@ class ConversationCase(
 
     fun clearHistory(platform: String, sessionId: String): Conversation {
         val conversation = controller.getOrCreate(platform, sessionId)
-        history.clear(conversation.id)
+        controller.getAll().filter { it.platform == platform && it.sessionId == sessionId }.forEach { history.clear(it.id) }
         controller.updateActivity(conversation.id)
         return conversation
     }

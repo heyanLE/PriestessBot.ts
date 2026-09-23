@@ -2,12 +2,14 @@ package com.heyanle.priestess.bot.platform
 
 import kotlinx.coroutines.Job
 import java.util.concurrent.atomic.AtomicBoolean
+import com.heyanle.priestess.bot.tool.FunctionTool
 
 sealed class MessageComponent {
     data class Text(val text: String) : MessageComponent()
     data class Image(val url: String) : MessageComponent()
     data class At(val userId: String) : MessageComponent()
-    data class File(val url: String, val name: String = "") : MessageComponent()
+    data class File @JvmOverloads constructor(val url: String, val name: String = "", val folderId: String? = null) : MessageComponent()
+    data class Reply(val messageId: String) : MessageComponent()
 }
 
 data class MessageChain(
@@ -74,11 +76,12 @@ abstract class AdapterConfig {
     abstract val displayName: String
 }
 
-data class PlatformMetadata(
+data class PlatformMetadata @JvmOverloads constructor(
     val name: String,
     val displayName: String,
     val supportStreaming: Boolean,
     val supportProactiveMessage: Boolean,
+    val supportReply: Boolean = false,
 )
 
 abstract class Platform {
@@ -88,6 +91,9 @@ abstract class Platform {
     abstract suspend fun run(): Job
     abstract suspend fun terminate()
     abstract suspend fun sendMessage(session: MessageSession, chain: MessageChain): String?
+
+    /** Stateless tools available only while this concrete Platform handles the message. */
+    open fun platformTools(): List<FunctionTool> = emptyList()
 
     fun setMessageHandler(handler: suspend (MessageEvent) -> Unit) {
         messageHandler = handler
@@ -101,3 +107,6 @@ abstract class Platform {
         error("${metadata.name} does not support webhook")
     }
 }
+
+/** A configured platform is valid but needs an operator setup action before it can run. */
+class PlatformSetupRequiredException(message: String) : IllegalStateException(message)

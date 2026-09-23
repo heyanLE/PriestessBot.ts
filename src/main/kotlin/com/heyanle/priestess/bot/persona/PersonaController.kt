@@ -19,6 +19,11 @@ import java.util.UUID
 class PersonaController(
     private val db: DatabaseCase,
 ) : BaseController("PersonaController") {
+    private companion object {
+        const val MAX_EXAMPLE_DIALOGS = 20
+        const val MAX_EXAMPLE_MESSAGE_CHARS = 8_000
+    }
+
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -55,6 +60,22 @@ class PersonaController(
         val id = request.id?.trim()?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
         val normalizedBoundaries = request.boundaries.map { it.trim() }.filter { it.isNotBlank() }.distinct()
         val normalizedAgentNames = request.agentNames.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        require(request.exampleDialogs.size <= MAX_EXAMPLE_DIALOGS) {
+            "Persona example dialogs must not exceed $MAX_EXAMPLE_DIALOGS pairs"
+        }
+        val normalizedExampleDialogs = request.exampleDialogs.mapIndexed { index, dialog ->
+            val user = dialog.user.trim()
+            val assistant = dialog.assistant.trim()
+            require(user.isNotBlank()) { "Persona example dialog ${index + 1} user message must not be blank" }
+            require(assistant.isNotBlank()) { "Persona example dialog ${index + 1} assistant message must not be blank" }
+            require(user.length <= MAX_EXAMPLE_MESSAGE_CHARS) {
+                "Persona example dialog ${index + 1} user message must not exceed $MAX_EXAMPLE_MESSAGE_CHARS characters"
+            }
+            require(assistant.length <= MAX_EXAMPLE_MESSAGE_CHARS) {
+                "Persona example dialog ${index + 1} assistant message must not exceed $MAX_EXAMPLE_MESSAGE_CHARS characters"
+            }
+            PersonaExampleDialog(user = user, assistant = assistant)
+        }
         val now = System.currentTimeMillis()
 
         return db.execute {
@@ -72,6 +93,7 @@ class PersonaController(
                 tone = request.tone.trim(),
                 boundaries = normalizedBoundaries,
                 systemPromptTemplate = request.systemPromptTemplate.trim(),
+                exampleDialogs = normalizedExampleDialogs,
                 enabled = request.enabled,
                 agentNames = normalizedAgentNames,
                 errorMessages = request.errorMessages.copy(
@@ -89,6 +111,7 @@ class PersonaController(
                     it[tone] = persona.tone
                     it[boundaries] = json.encodeToString(persona.boundaries)
                     it[systemPromptTemplate] = persona.systemPromptTemplate
+                    it[exampleDialogs] = json.encodeToString(persona.exampleDialogs)
                     it[enabled] = persona.enabled
                     it[agentNames] = json.encodeToString(persona.agentNames)
                     it[errorMessages] = json.encodeToString(persona.errorMessages)
@@ -104,6 +127,7 @@ class PersonaController(
                     it[tone] = persona.tone
                     it[boundaries] = json.encodeToString(persona.boundaries)
                     it[systemPromptTemplate] = persona.systemPromptTemplate
+                    it[exampleDialogs] = json.encodeToString(persona.exampleDialogs)
                     it[enabled] = persona.enabled
                     it[agentNames] = json.encodeToString(persona.agentNames)
                     it[errorMessages] = json.encodeToString(persona.errorMessages)
@@ -151,6 +175,7 @@ class PersonaController(
             tone = this[PersonasTable.tone],
             boundaries = json.decodeFromString(this[PersonasTable.boundaries]),
             systemPromptTemplate = this[PersonasTable.systemPromptTemplate],
+            exampleDialogs = json.decodeFromString(this[PersonasTable.exampleDialogs]),
             enabled = this[PersonasTable.enabled],
             agentNames = json.decodeFromString(this[PersonasTable.agentNames]),
             errorMessages = json.decodeFromString(this[PersonasTable.errorMessages]),

@@ -19,6 +19,9 @@ class ReadFileTool : FunctionTool() {
     override val schema = ToolSchema(
         name = "read_file",
         description = "Read a UTF-8 text file from the current workspace with line-based pagination.",
+        guidance = "Use this instead of a shell command to inspect text files. Read a range before editing a " +
+            "file you have not seen, and read again after a write when the next change depends on the result.",
+        parallelSafe = true,
         parameters = ToolParameters(
             properties = listOf(
                 ParameterDef("path", description = "Workspace-relative file path.", required = true),
@@ -75,6 +78,8 @@ class WriteFileTool : FunctionTool() {
     override val schema = ToolSchema(
         name = "write_file",
         description = "Write a UTF-8 text file inside the current workspace.",
+        guidance = "This replaces the whole file. Prefer 'patch' for a small change to an existing file, and read " +
+            "the file first when you are not certain of its current contents.",
         parameters = ToolParameters(
             properties = listOf(
                 ParameterDef("path", description = "Workspace-relative file path.", required = true),
@@ -121,6 +126,8 @@ class PatchFileTool : FunctionTool() {
     override val schema = ToolSchema(
         name = "patch",
         description = "Patch a workspace text file by replacing an exact text fragment.",
+        guidance = "The fragment must match the file exactly, so read the region first. Prefer this over 'write_file' " +
+            "for a targeted change. If a match fails, re-read the file rather than retrying the same fragment.",
         parameters = ToolParameters(
             properties = listOf(
                 ParameterDef("mode", description = "Patch mode. Only 'replace' is supported currently."),
@@ -190,6 +197,9 @@ class SearchFilesTool : FunctionTool() {
     override val schema = ToolSchema(
         name = "search_files",
         description = "Search text files in the current workspace for matching content.",
+        guidance = "Use this to locate something before reading it. It returns matching lines, not whole files, so " +
+            "follow up with 'read_file' once you know the path.",
+        parallelSafe = true,
         parameters = ToolParameters(
             properties = listOf(
                 ParameterDef("pattern", description = "Substring or regular expression to search for.", required = true),

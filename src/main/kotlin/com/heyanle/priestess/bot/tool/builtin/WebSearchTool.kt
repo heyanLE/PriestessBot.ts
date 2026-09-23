@@ -134,15 +134,15 @@ class WebSearchTool(
             throw IllegalStateException("Bing search returned HTTP ${response.status.value}")
         }
         val body = response.bodyAsText()
-        val resultRegex = Regex(
-            """<li class="b_algo"[\s\S]*?<h2><a href="([^"]+)"[^>]*>([\s\S]*?)</a>[\s\S]*?(?:<p>([\s\S]*?)</p>)?""",
-            setOf(RegexOption.IGNORE_CASE),
-        )
-        return resultRegex.findAll(body)
-            .mapNotNull { match ->
-                val url = htmlDecode(match.groupValues[1]).trim()
-                val title = htmlToText(match.groupValues[2]).trim()
-                val snippet = htmlToText(match.groupValues.getOrElse(3) { "" }).trim()
+        val blockRegex = Regex("""<li class="b_algo"[\s\S]*?</li>""", RegexOption.IGNORE_CASE)
+        val linkRegex = Regex("""<h2><a href="([^"]+)"[^>]*>([\s\S]*?)</a>""", RegexOption.IGNORE_CASE)
+        val snippetRegex = Regex("""<p>([\s\S]*?)</p>""", RegexOption.IGNORE_CASE)
+        return blockRegex.findAll(body)
+            .mapNotNull { block ->
+                val link = linkRegex.find(block.value) ?: return@mapNotNull null
+                val url = htmlDecode(link.groupValues[1]).trim()
+                val title = htmlToText(link.groupValues[2]).trim()
+                val snippet = htmlToText(snippetRegex.find(block.value)?.groupValues?.get(1).orEmpty()).trim()
                 if (title.isBlank() || url.isBlank()) null else SearchResult(title = title, url = url, snippet = snippet)
             }
             .take(numResults)

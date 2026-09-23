@@ -1,10 +1,12 @@
 package com.heyanle.priestess.bot.platform
 
 import com.heyanle.priestess.bot.config.PlatformConfig
+import com.heyanle.priestess.bot.tool.FunctionTool
 
 data class PlatformRegistration(
     val metadata: PlatformMetadata,
     val factory: (PlatformConfig?) -> Platform,
+    val toolFactory: () -> List<FunctionTool> = { emptyList() },
 )
 
 object PlatformRegistry {
@@ -12,9 +14,13 @@ object PlatformRegistry {
     private val lock = Any()
     private val platforms = LinkedHashMap<String, PlatformRegistration>()
 
-    fun registerMeta(metadata: PlatformMetadata, factory: (PlatformConfig?) -> Platform) {
+    fun registerMeta(
+        metadata: PlatformMetadata,
+        toolFactory: () -> List<FunctionTool> = { emptyList() },
+        factory: (PlatformConfig?) -> Platform,
+    ) {
         synchronized(lock) {
-            platforms[metadata.name] = PlatformRegistration(metadata, factory)
+            platforms[metadata.name] = PlatformRegistration(metadata, factory, toolFactory)
         }
     }
 
@@ -28,6 +34,10 @@ object PlatformRegistry {
         return synchronized(lock) {
             platforms.values.map { it.metadata }
         }
+    }
+
+    fun getDeclaredTools(): List<FunctionTool> = synchronized(lock) {
+        platforms.values.flatMap { it.toolFactory() }.distinctBy { it.schema.name }
     }
 
     fun createPlatform(name: String, config: PlatformConfig? = null): Platform? {

@@ -12,14 +12,17 @@ fi
 
 CONFIG_PATH="${PRIESTESS_CONFIG_PATH:-$DEFAULT_CONFIG}"
 HEALTH_URL="${PRIESTESS_HEALTH_URL:-http://127.0.0.1:8080/health}"
+EXIT_AFTER_READY="${PRIESTESS_BLACKBOX_EXIT_AFTER_READY:-false}"
+EXPECT_CONFIG_MODE="${PRIESTESS_EXPECT_CONFIG_MODE:-}"
+BUILD_DASHBOARD="${PRIESTESS_BUILD_DASHBOARD:-true}"
 
 if [[ ! -f "$CONFIG_PATH" ]]; then
   echo "Configuration file not found: $CONFIG_PATH" >&2
   exit 1
 fi
 
-echo "Building the packaged Dashboard and application JAR..."
-(cd "$PROJECT_DIR" && ./gradlew --no-daemon -PbuildDashboard=true jar)
+echo "Building the application distribution..."
+(cd "$PROJECT_DIR" && ./gradlew --no-daemon -PbuildDashboard="$BUILD_DASHBOARD" installDist)
 
 echo "Starting black-box runtime with config: $CONFIG_PATH"
 env \
@@ -34,8 +37,22 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 for _ in {1..30}; do
-  if curl -fsS "$HEALTH_URL" >/dev/null; then
+  if HEALTH_BODY="$(curl -fsS "$HEALTH_URL" 2>/dev/null)"; then
+    if [[ -n "$EXPECT_CONFIG_MODE" ]]; then
+      if ! grep -Eq "\"configMode\"[[:space:]]*:[[:space:]]*\"$EXPECT_CONFIG_MODE\"" <<< "$HEALTH_BODY"; then
+        echo "Health response did not report configMode=$EXPECT_CONFIG_MODE" >&2
+        echo "$HEALTH_BODY" >&2
+        exit 1
+      fi
+    fi
+    if [[ "$EXPECT_CONFIG_MODE" == "v2" ]]; then
+      [[ "$HEALTH_BODY" == *'"activeSnapshotVersion"'* ]] || { echo "Health response omitted activeSnapshotVersion" >&2; exit 1; }
+      [[ "$HEALTH_BODY" == *'"workspaceSnapshotVersions"'* ]] || { echo "Health response omitted workspaceSnapshotVersions" >&2; exit 1; }
+    fi
     echo "Black-box runtime is ready. Dashboard: ${HEALTH_URL%/health}"
+    if [[ "$EXIT_AFTER_READY" == "true" ]]; then
+      exit 0
+    fi
     wait "$SERVER_PID"
     exit $?
   fi

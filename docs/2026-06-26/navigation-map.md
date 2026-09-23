@@ -20,7 +20,7 @@
 | 改提醒投递 | `reminder` | `ReminderCase` | `ReminderController.kt` |
 | 改角色设定 | `persona` | `PersonaCase` | `PersonaController.kt`, `PersonaMemoryInjector.kt` |
 | 改 workspace | `workspace` | `WorkspaceController` | `WorkspaceConfigSource.kt`, `RealWorkspaceMcpToolResolver.kt` |
-| 改配置系统 | `config` | `ConfigCase` | `ConfigController.kt` |
+| 改配置系统 | `config` | `ConfigurationRuntimeService` | `config/model`, `config/source`, `config/resolve`, `config/runtime` |
 | 改插件生命周期 | `plugin` | `PluginCase` | `PluginController.kt`, `PluginExtensionRegistry.kt` |
 | 改观测和健康 | `observability` + `server` | - | `MetricsRegistry.kt`, `DashboardService.kt` |
 
@@ -71,4 +71,3 @@
 3. `developer-playbook.md`
 4. `navigation-map.md`
 5. 具体模块页
-

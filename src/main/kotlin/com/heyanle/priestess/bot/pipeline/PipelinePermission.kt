@@ -3,8 +3,11 @@ package com.heyanle.priestess.bot.pipeline
 import com.heyanle.priestess.bot.config.PermissionConfig
 
 enum class PermissionGroup {
+    /** 普通干员：允许使用常规读取和低风险会话能力。 */
     OPERATOR,
+    /** 资深干员：允许使用显式启用的写入和管理能力。 */
     ADMIN,
+    /** 超级管理员：包含全部下级权限。 */
     SUPER_ADMIN;
 
     fun satisfies(required: PermissionGroup): Boolean = ordinal >= required.ordinal

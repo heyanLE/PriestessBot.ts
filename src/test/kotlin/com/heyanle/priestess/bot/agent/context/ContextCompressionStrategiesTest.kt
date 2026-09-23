@@ -13,6 +13,34 @@ class ContextCompressionStrategiesTest {
     private val tokenCounter = TokenCounter()
 
     @Test
+    fun `token budget never keeps an answer after removing its user turn`() = runBlocking {
+        val system = ConversationMessage.system("system")
+        val current = ConversationMessage.user("real request")
+        val result = TokenWindowStrategy(tokenCounter).compress(listOf(
+            system, ConversationMessage.user("long old question ".repeat(30)),
+            ConversationMessage.assistant("old answer"), current,
+        ), system, maxTokens = 20, maxRounds = 10)
+        assertEquals(listOf(system, current), result)
+    }
+
+    @Test
+    fun `current user survives a system prompt exceeding the soft budget`() = runBlocking {
+        val system = ConversationMessage.system("large system ".repeat(100))
+        val current = ConversationMessage.user("do this task")
+        assertEquals(listOf(system, current), TokenWindowStrategy(tokenCounter).compress(listOf(system, current), system, 10, 1))
+    }
+
+    @Test
+    fun `token window honors real turn limit even when tokens are plentiful`() = runBlocking {
+        val system = ConversationMessage.system("system")
+        val old = ConversationMessage.user("old")
+        val current = ConversationMessage.user("current")
+        assertEquals(listOf(system, current), TokenWindowStrategy(tokenCounter).compress(
+            listOf(system, old, ConversationMessage.assistant("old answer"), current), system, 10000, 1,
+        ))
+    }
+
+    @Test
     fun `round truncation keeps system message and latest rounds`() = runBlocking {
         val system = ConversationMessage.system("system")
         val messages = mutableListOf(system)

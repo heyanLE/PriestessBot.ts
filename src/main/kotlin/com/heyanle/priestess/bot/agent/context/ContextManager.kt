@@ -13,6 +13,7 @@ class ContextManager(
         CompressStrategy.ROUND_TRUNCATION to RoundTruncationStrategy(),
         CompressStrategy.TOKEN_WINDOW to TokenWindowStrategy(tokenCounter),
     ),
+    private val pruner: ToolResultPruner = ToolResultPruner(),
 ) {
     suspend fun compress(
         agent: Agent,
@@ -20,6 +21,7 @@ class ContextManager(
         systemMessage: ConversationMessage?,
         maxTokens: Int = -1,
         maxRounds: Int = -1,
+        summarizer: ContextSummarizer? = null,
     ): List<ConversationMessage> {
         if (messages.isEmpty()) return messages
         val validMessages = ToolCallRoundSanitizer.sanitize(messages)
@@ -28,7 +30,7 @@ class ContextManager(
         if (!needsCompression(validMessages, effectiveMaxTokens, effectiveMaxRounds)) {
             return validMessages
         }
-        val strategy = getStrategy(agent)
+        val strategy = strategyFor(agent, summarizer)
         return ToolCallRoundSanitizer.sanitize(
             strategy.compress(validMessages, systemMessage, effectiveMaxTokens, effectiveMaxRounds),
         )
@@ -46,8 +48,16 @@ class ContextManager(
         return false
     }
 
-    private fun getStrategy(agent: Agent): ContextCompressStrategy {
-        return strategies[agent.compressStrategy]
-            ?: error("Unknown compress strategy: ${agent.compressStrategy}")
-    }
+    /**
+     * Summarization needs a provider, which only the runner has, so it arrives per call. Without one the
+     * Agent truncates instead: silently not compressing would let the request exceed the window.
+     */
+    private fun strategyFor(agent: Agent, summarizer: ContextSummarizer?): ContextCompressStrategy =
+        when (agent.compressStrategy) {
+            CompressStrategy.LLM_SUMMARIZATION -> summarizer?.let {
+                LlmSummarizationStrategy(tokenCounter, it, TokenWindowStrategy(tokenCounter), pruner)
+            } ?: TokenWindowStrategy(tokenCounter)
+            else -> strategies[agent.compressStrategy]
+                ?: error("Unknown compress strategy: ${agent.compressStrategy}")
+        }
 }

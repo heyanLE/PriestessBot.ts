@@ -35,8 +35,6 @@ internal data class FileFormat(
 internal fun AgentToolContext.workspaceLocationOrNull(): WorkspaceToolLocation? {
     val root = metadata["workspaceRootDir"]
         ?: metadata["workspace_root_dir"]
-        ?: metadata["workspaceDir"]
-        ?: metadata["workspace_dir"]
         ?: return null
     val rootPath = runCatching { Path.of(root).toAbsolutePath().normalize() }.getOrNull() ?: return null
     return WorkspaceToolLocation(rootPath)

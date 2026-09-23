@@ -1,3 +1,5 @@
+> 此文记录旧版部署方式。当前 v3 请使用 [配置说明](configuration-v3.md) 与仓库根目录 `deploy-nas.sh`，不再从本地 BAT 生成 NAS 配置。
+
 # v2 Runtime Deployment
 
 ## Local Docker

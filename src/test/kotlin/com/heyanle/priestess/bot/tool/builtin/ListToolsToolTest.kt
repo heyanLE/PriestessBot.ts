@@ -106,7 +106,7 @@ class ListToolsToolTest {
         assertEquals("Requires memory dependency", unavailable.getValue("memory_recall").statusReason)
         assertEquals("Requires reminder dependency", unavailable.getValue("list_reminders").statusReason)
         assertEquals("Requires knowledge dependency", unavailable.getValue("knowledge_search").statusReason)
-        assertEquals("Requires search provider dependency", unavailable.getValue("web_search").statusReason)
+        assertEquals(null, unavailable.getValue("web_search").statusReason)
         assertFalse(unavailable.getValue("memory_recall").effectiveEnabled)
         assertFalse(unavailable.getValue("list_reminders").effectiveEnabled)
     }

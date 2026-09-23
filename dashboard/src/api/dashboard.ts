@@ -6,99 +6,49 @@ export interface HealthResponse {
   diagnostics: Record<string, string>;
 }
 
-export interface ServerConfig {
-  enabled: boolean;
-  host: string;
-  port: number;
-  corsEnabled: boolean;
-  configWatchEnabled: boolean;
-  configWatchIntervalMillis: number;
+export interface ConfigurationDiagnostic {
+  code: string;
+  severity: 'INFO' | 'WARNING' | 'ERROR';
+  message: string;
+  source: string;
+  path: string;
 }
 
-export interface PluginConfig {
-  enabled: boolean;
-  directory: string;
-  autoDiscover: boolean;
+export interface RawGlobalConfigurationResponse {
+  document?: Record<string, unknown> | null;
+  normalizedSourcePath: string;
+  revision?: string | null;
+  schemaVersion?: number | null;
+  diagnostics: ConfigurationDiagnostic[];
 }
 
-export interface PlatformConfig {
-  name: string;
-  type: string;
-  enabled: boolean;
-  host: string;
-  port: number;
-  wsPort: number;
-  token: string;
-  baseUrl: string;
-  useWs: boolean;
-  config: Record<string, string>;
+export interface EffectiveConfigurationResponse {
+  activeVersion: number;
+  desiredRevision: string;
+  sourceFingerprint: string;
+  loadedAtEpochMillis: number;
+  runtime: Record<string, unknown>;
+  platforms: Record<string, Record<string, unknown>>;
+  providers: Record<string, Record<string, unknown>>;
+  workspaces: Record<string, Record<string, unknown>>;
+  provenance: Record<string, Record<string, unknown>>;
+  diagnostics: ConfigurationDiagnostic[];
+  pendingRestart: Array<{ path: string; reason: string }>;
 }
 
-export interface ProviderConfig {
-  name: string;
-  type: string;
-  model: string;
-  baseUrl: string;
-  apiKey: string;
-  enabled: boolean;
-  config: Record<string, string>;
+export interface ConfigurationOperationResult {
+  success: boolean;
+  desiredRevision?: string | null;
+  activeVersion?: number | null;
+  diagnostics: ConfigurationDiagnostic[];
+  activationPlan: { changes: Array<{ path: string; mode: string; summary: string }> };
+  pendingRestartPaths: string[];
 }
 
-export interface AgentConfig {
-  name: string;
-  instructions: string;
-  model: string;
-  providerName: string;
-  maxSteps: number;
-  temperature: number;
-  compressStrategy: string;
-  maxRounds: number;
-  maxTokens: number;
-  toolTimeoutSeconds: number;
-  enabledTools: string[];
-  disabledTools: string[];
-  allowedRiskLevels: ToolDto['riskLevel'][];
-}
-
-export interface PriestessConfig {
-  platforms: PlatformConfig[];
-  providers: ProviderConfig[];
-  agent: AgentConfig;
-  workspaces?: WorkspaceConfig[];
-  workingDirectory: { path: string };
-  subAgents: SubAgentOrchestrationConfig;
-  database: { path: string };
-  pipeline: Record<string, unknown>;
-  server: ServerConfig;
-  plugins: PluginConfig;
-}
-
-export interface WorkspaceSkillConfig {
-  name: string;
-  enabled: boolean;
-  settings: Record<string, string>;
-}
-
-export interface WorkspaceMcpServerConfig {
+export interface ConfigurationBackupView {
   id: string;
-  enabled: boolean;
-  transport: string;
-  command: string;
-  args: string[];
-  url: string;
-  env: Record<string, string>;
-}
-
-export interface WorkspaceToolConfig {
-  enabledTools: string[];
-  disabledTools: string[];
-  allowedRiskLevels: ToolDto['riskLevel'][];
-}
-
-export interface WorkspacePersonaConfig {
-  id: string;
-  enabled: boolean;
-  agentNames: string[];
+  createdAtEpochMillis: number;
+  sizeBytes: number;
 }
 
 export interface WorkspaceMemoryPolicyConfig {
@@ -106,59 +56,6 @@ export interface WorkspaceMemoryPolicyConfig {
   allowedScopes: string[];
   knowledgeBaseIds: string[];
   maxInjectedMemories: number;
-}
-
-export interface WorkspaceResolutionConfig {
-  platformNames: string[];
-  sessionIds: string[];
-  userIds: string[];
-}
-
-export interface WorkspaceConfig {
-  id: string;
-  name: string;
-  enabled: boolean;
-  isDefault: boolean;
-  agents: AgentConfig[];
-  providerName: string;
-  skills: WorkspaceSkillConfig[];
-  mcpServers: WorkspaceMcpServerConfig[];
-  tools: WorkspaceToolConfig;
-  personas: WorkspacePersonaConfig[];
-  memory: WorkspaceMemoryPolicyConfig;
-  subAgents: SubAgentOrchestrationConfig;
-  resolution: WorkspaceResolutionConfig;
-}
-
-export interface ConfigBackup {
-  id: string;
-  createdAt: string;
-  sizeBytes: number;
-  path: string;
-}
-
-export interface PersistedConfigRevisionDto {
-  revision: number;
-  savedAt: number;
-  source: string;
-}
-
-export interface DatabaseConfigLayerResponse {
-  config: PriestessConfig;
-  revision?: PersistedConfigRevisionDto | null;
-  diagnostics: string[];
-}
-
-export interface EnvironmentOverrideSummaryDto {
-  path: string;
-  envKey: string;
-  summary: string;
-  sensitive: boolean;
-}
-
-export interface EnvironmentOverrideSummaryResponse {
-  overrides: EnvironmentOverrideSummaryDto[];
-  diagnostics: string[];
 }
 
 export interface WorkingDirectoryAgentDto {
@@ -190,54 +87,6 @@ export interface WorkingDirectorySummaryResponse {
   lastLoadedAt: number;
 }
 
-export interface WorkingDirectoryUpdateRequest {
-  path: string;
-}
-
-export interface EffectiveRuntimePreviewRequest {
-  workdirPath?: string;
-  agent?: AgentConfig;
-  providerName?: string;
-  maxInjectedMemories?: number;
-}
-
-export interface EffectiveValueTraceDto {
-  path: string;
-  summary: string;
-  source: string;
-  overriddenBy?: string;
-}
-
-export interface EffectiveRuntimePreviewResponse {
-  config: PriestessConfig;
-  workingDirectory: WorkingDirectorySummaryResponse;
-  memoryPolicy: WorkspaceMemoryPolicyConfig;
-  trace: EffectiveValueTraceDto[];
-  diagnostics: string[];
-}
-
-export interface SubAgentConfig {
-  name: string;
-  description: string;
-  agent: AgentConfig;
-  enabled: boolean;
-}
-
-export interface SubAgentRouteConfig {
-  name: string;
-  targetAgentName: string;
-  keywords: string[];
-  priority: number;
-  enabled: boolean;
-}
-
-export interface SubAgentOrchestrationConfig {
-  enabled: boolean;
-  defaultAgentName: string;
-  agents: SubAgentConfig[];
-  routes: SubAgentRouteConfig[];
-}
-
 export interface PlatformStatusDto {
   name: string;
   type: string;
@@ -248,6 +97,19 @@ export interface PlatformStatusDto {
   wsPort: number;
 }
 
+export interface WeixinQrLoginDto {
+  sessionId: string;
+  platformId: string;
+  status: 'WAITING' | 'SCANNED' | 'CONFIRMED' | 'EXPIRED' | 'FAILED' | 'CANCELLED';
+  qrImageDataUrl?: string;
+  qrRevision: number;
+  expiresAtEpochMillis: number;
+  pollAfterMillis: number;
+  message: string;
+  accountId?: string;
+  platformRunning: boolean;
+}
+
 export interface ProviderDto {
   name: string;
   displayName: string;
@@ -256,6 +118,8 @@ export interface ProviderDto {
   supportVision: boolean;
   supportStreaming: boolean;
 }
+
+export type ToolPermissionGroup = 'OPERATOR' | 'ADMIN' | 'SUPER_ADMIN';
 
 export interface ToolDto {
   name: string;
@@ -271,6 +135,7 @@ export interface ToolDto {
   defaultEnabled: boolean;
   effectiveEnabled: boolean;
   auditLog: boolean;
+  requiredPermissionGroup: ToolPermissionGroup;
   statusReason?: string;
 }
 
@@ -325,7 +190,6 @@ export interface LogEventDto {
 
 export interface AgentChatRequest {
   message: string;
-  config?: AgentConfig;
   conversationId?: string;
   workspaceId?: string;
   platformId?: string;
@@ -372,8 +236,11 @@ export interface AgentChatInjectedMemoryDto {
 
 export interface SubAgentTestRequest {
   message: string;
-  config?: SubAgentOrchestrationConfig;
   conversationId?: string;
+  workspaceId?: string;
+  platformId?: string;
+  sessionId?: string;
+  userId?: string;
 }
 
 export interface SubAgentTestResponse {
@@ -488,6 +355,11 @@ export interface WorkspaceResourceListResponse {
   resources: string[];
 }
 
+export interface PersonaExampleDialog {
+  user: string;
+  assistant: string;
+}
+
 export interface Persona {
   id: string;
   workspaceId: string;
@@ -496,6 +368,7 @@ export interface Persona {
   tone: string;
   boundaries: string[];
   systemPromptTemplate: string;
+  exampleDialogs: PersonaExampleDialog[];
   enabled: boolean;
   agentNames: string[];
   createdAt: number;
@@ -515,6 +388,7 @@ export interface PersonaUpsertDto {
   tone: string;
   boundaries: string[];
   systemPromptTemplate: string;
+  exampleDialogs: PersonaExampleDialog[];
   enabled: boolean;
   agentNames: string[];
 }
@@ -609,7 +483,7 @@ export function dashboardApiToken(): string {
   return window.localStorage.getItem(dashboardTokenKey)?.trim() ?? '';
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = dashboardApiToken();
   const response = await fetch(path, {
     headers: {
@@ -620,7 +494,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
+    const body = await response.text();
+    throw new Error(`${response.status} ${response.statusText}${body ? `: ${body.slice(0, 2000)}` : ""}`);
   }
   return response.json() as Promise<T>;
 }
@@ -636,37 +511,21 @@ function queryString(values: Record<string, string | number | undefined>) {
 
 export const dashboardApi = {
   health: () => request<HealthResponse>('/health'),
-  config: () => request<PriestessConfig>('/api/config'),
-  configBackups: () => request<ConfigBackup[]>('/api/config/backups'),
-  replaceConfig: (config: PriestessConfig) =>
-    request<PriestessConfig>('/api/config', {
-      method: 'PUT',
-      body: JSON.stringify(config),
-    }),
-  databaseConfigLayer: () => request<DatabaseConfigLayerResponse>('/api/config/layers/database'),
-  replaceDatabaseConfigLayer: (config: PriestessConfig) =>
-    request<DatabaseConfigLayerResponse>('/api/config/layers/database', {
-      method: 'PUT',
-      body: JSON.stringify(config),
-    }),
-  environmentOverrideSummary: () => request<EnvironmentOverrideSummaryResponse>('/api/config/layers/environment'),
+  rawConfiguration: () => request<RawGlobalConfigurationResponse>('/api/config/v2/raw'),
+  effectiveConfiguration: () => request<EffectiveConfigurationResponse>('/api/config/v2/effective'),
+  previewConfiguration: (content: string) => request<ConfigurationOperationResult>('/api/config/v2/preview', { method: 'POST', body: JSON.stringify({ content }) }),
+  applyConfiguration: (content: string, expectedRevision?: string | null) => request<ConfigurationOperationResult>('/api/config/v2', { method: 'PUT', body: JSON.stringify({ content, expectedRevision }) }),
+  reloadConfiguration: () => request<ConfigurationOperationResult>('/api/config/v2/reload', { method: 'POST' }),
+  configBackups: () => request<ConfigurationBackupView[]>('/api/config/v2/backups'),
+  restoreConfigBackup: (id: string) => request<ConfigurationOperationResult>(`/api/config/v2/backups/${encodeURIComponent(id)}/restore`, { method: 'POST' }),
   workingDirectorySummary: () => request<WorkingDirectorySummaryResponse>('/api/config/workdir'),
-  updateWorkingDirectorySelection: (body: WorkingDirectoryUpdateRequest) =>
-    request<WorkingDirectorySummaryResponse>('/api/config/workdir', {
-      method: 'PUT',
-      body: JSON.stringify(body),
-    }),
-  effectiveRuntimePreview: (body: EffectiveRuntimePreviewRequest = {}) =>
-    request<EffectiveRuntimePreviewResponse>('/api/config/preview', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-  reloadConfig: () => request<PriestessConfig>('/api/config/reload', { method: 'POST' }),
-  restoreConfigBackup: (id: string) =>
-    request<PriestessConfig>(`/api/config/backups/${encodeURIComponent(id)}/restore`, { method: 'POST' }),
   platforms: () => request<PlatformStatusDto[]>('/api/platforms'),
-  startPlatform: (name: string) => request<PriestessConfig>(`/api/platforms/${encodeURIComponent(name)}/start`, { method: 'POST' }),
-  stopPlatform: (name: string) => request<PriestessConfig>(`/api/platforms/${encodeURIComponent(name)}/stop`, { method: 'POST' }),
+  startWeixinQrLogin: (platformId: string) =>
+    request<WeixinQrLoginDto>(`/api/platforms/${encodeURIComponent(platformId)}/weixin/qr`, { method: 'POST' }),
+  weixinQrLoginStatus: (platformId: string, sessionId: string) =>
+    request<WeixinQrLoginDto>(`/api/platforms/${encodeURIComponent(platformId)}/weixin/qr/${encodeURIComponent(sessionId)}`),
+  cancelWeixinQrLogin: (platformId: string, sessionId: string) =>
+    request<WeixinQrLoginDto>(`/api/platforms/${encodeURIComponent(platformId)}/weixin/qr/${encodeURIComponent(sessionId)}/cancel`, { method: 'POST' }),
   providers: () => request<ProviderDto[]>('/api/providers'),
   testProviders: () => request<Record<string, boolean>>('/api/providers/test', { method: 'POST' }),
   tools: () => request<ToolDto[]>('/api/tools'),
@@ -748,12 +607,6 @@ export const dashboardApi = {
     request<AgentChatResponse>('/api/agent/chat', {
       method: 'POST',
       body: JSON.stringify(body),
-    }),
-  subAgentConfig: () => request<SubAgentOrchestrationConfig>('/api/sub-agents/config'),
-  replaceSubAgentConfig: (config: SubAgentOrchestrationConfig) =>
-    request<SubAgentOrchestrationConfig>('/api/sub-agents/config', {
-      method: 'PUT',
-      body: JSON.stringify(config),
     }),
   testSubAgent: (body: SubAgentTestRequest) =>
     request<SubAgentTestResponse>('/api/sub-agents/test', {

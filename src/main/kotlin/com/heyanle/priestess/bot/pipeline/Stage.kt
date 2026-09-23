@@ -21,6 +21,7 @@ interface Stage {
  * Execution order for the pipeline stages.
  */
 enum class StageOrder(val level: Int) {
+    IM_ROUTE(0),
     WAKING_CHECK(1),
     WHITELIST_CHECK(2),
     RATE_LIMIT(3),

@@ -1,7 +1,8 @@
 package com.heyanle.priestess.bot.provider
 
-import com.heyanle.priestess.bot.config.ConfigCase
 import com.heyanle.priestess.bot.config.ProviderConfig
+import com.heyanle.priestess.bot.config.model.EffectiveProviderConnection
+import com.heyanle.priestess.bot.config.runtime.RuntimeConfigurationCase
 import com.heyanle.priestess.bot.core.controller.BaseController
 import kotlinx.coroutines.flow.collectLatest
 
@@ -9,17 +10,19 @@ import kotlinx.coroutines.flow.collectLatest
  * 模型提供者控制器，负责根据配置维护可用的运行时模型提供者。
  */
 class ProviderController(
-    configCase: ConfigCase,
+    private val runtimeConfig: RuntimeConfigurationCase,
 ) : BaseController("ProviderController") {
 
     private val configProviders = mutableMapOf<String, ChatProvider>()
     private val runtimeProviders = mutableMapOf<String, ChatProvider>()
+    private val effectiveProviders = mutableMapOf<EffectiveProviderConnection, ChatProvider>()
 
     init {
         registerBuiltinProviders()
-        refreshConfigProviders(configCase.current().providers)
+        refreshConfigProviders(runtimeConfig.current().providers.values)
         launchTask("provider-config-refresh") {
-            configCase.providerConfigsFlow.collectLatest { configs ->
+            runtimeConfig.updates.collectLatest { config ->
+                val configs = config.providers.values
                 refreshConfigProviders(configs)
             }
         }
@@ -45,6 +48,26 @@ class ProviderController(
 
     fun getMetaList(): List<ProviderMetadata> = getAll().map { it.metadata }
 
+    /** Creates an exact v2 provider connection. No name, model, or first-provider fallback is applied. */
+    @Synchronized
+    fun getEffective(connection: EffectiveProviderConnection): ChatProvider? {
+        if (!connection.enabled) return null
+        return effectiveProviders.getOrPut(connection) {
+            val config = ProviderConfig(
+                name = connection.id,
+                type = connection.type,
+                model = "",
+                baseUrl = connection.endpoint,
+                apiKey = connection.credential?.reveal().orEmpty(),
+                enabled = connection.enabled,
+                config = connection.settings,
+                credentialResolved = true,
+            )
+            ProviderRegistry.createByType(connection.type, config)
+                ?: return null
+        }
+    }
+
     suspend fun testAll(): Map<String, Boolean> {
         return getAll().associate { provider ->
             provider.metadata.name to try {
@@ -57,10 +80,22 @@ class ProviderController(
     }
 
     @Synchronized
-    private fun refreshConfigProviders(configs: List<ProviderConfig>) {
+    private fun refreshConfigProviders(configs: Collection<EffectiveProviderConnection>) {
         configProviders.clear()
-        for (config in configs) {
-            val provider = ProviderRegistry.createFromConfig(config) ?: continue
+        effectiveProviders.keys.retainAll(configs.toSet())
+        for (connection in configs) {
+            if (!connection.enabled) continue
+            val config = ProviderConfig(
+                name = connection.id,
+                type = connection.type,
+                model = "",
+                baseUrl = connection.endpoint,
+                apiKey = connection.credential?.reveal().orEmpty(),
+                enabled = true,
+                config = connection.settings,
+                credentialResolved = true,
+            )
+            val provider = ProviderRegistry.createByType(connection.type, config) ?: continue
             configProviders[provider.metadata.name] = provider
         }
     }

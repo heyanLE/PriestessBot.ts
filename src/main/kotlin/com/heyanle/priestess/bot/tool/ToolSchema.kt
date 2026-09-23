@@ -24,6 +24,22 @@ data class ToolSchema @JvmOverloads constructor(
     val defaultEnabled: Boolean = true,
     val auditLog: Boolean = false,
     val requiredPermissionGroup: PermissionGroup = PermissionGroup.OPERATOR,
+    /**
+     * Short behavioural guidance rendered into the Agent's prompt as its own block. Use it for how to
+     * operate the tool — when to prefer it, what it cannot do — never to restate the parameter schema,
+     * which reaches the model as a native function definition.
+     *
+     * Declared last on purpose: plugins are compiled against this constructor, so inserting a parameter
+     * ahead of an existing one would break every positional Java call (the demo plugin test covers this).
+     */
+    val guidance: String = "",
+    /**
+     * Whether this tool may run concurrently with adjacent parallel-safe calls in one step. Opting in is
+     * an explicit claim: leave it false for anything that mutates state, so exclusive calls stay ordered.
+     *
+     * Declared last for the same ABI reason as [guidance].
+     */
+    val parallelSafe: Boolean = false,
 ) {
     /**
      * Converts this schema to OpenAI function-calling format.

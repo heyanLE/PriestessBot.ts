@@ -4,14 +4,13 @@
       <div class="memory-hero-grid">
         <div class="memory-copy">
           <div class="memory-band">
-            <span>Assets</span>
-            <span>Workspace {{ workspaceId }}</span>
+            <span>资源</span>
+            <span>工作区 {{ workspaceId }}</span>
           </div>
 
-          <h2>Persona and memory registry</h2>
+          <h2>人格与记忆配置</h2>
           <p>
-            Align persona overlays and retrieval records. Keep injection tone, memory scope, and
-            search relevance visible while you edit the registry.
+            统一管理人格预设和记忆记录，编辑时可随时查看注入风格、记忆范围和搜索相关性。
           </p>
 
           <div class="grid memory-signal-grid">
@@ -27,23 +26,23 @@
           <article class="card memory-rail-card">
             <div class="section-title compact">
               <div>
-                <h3>What matters here</h3>
-                <p>Persona tone and memory scope should stay readable, scoped, and easy to test.</p>
+                <h3>检查重点</h3>
+                <p>人格风格和记忆范围应清晰、可控且便于测试。</p>
               </div>
             </div>
 
             <div class="rail-list">
               <div class="rail-item">
-                <span>Active workspace</span>
+                <span>当前工作区</span>
                 <strong>{{ workspaceId }}</strong>
               </div>
               <div class="rail-item">
-                <span>Selected persona</span>
-                <strong>{{ selectedPersona?.name ?? 'None' }}</strong>
+                <span>已选人格预设</span>
+                <strong>{{ selectedPersona?.name ?? '无' }}</strong>
               </div>
               <div class="rail-item">
-                <span>Selected memory</span>
-                <strong>{{ selectedMemory?.type ?? 'None' }}</strong>
+                <span>已选记忆</span>
+                <strong>{{ selectedMemory ? memoryTypeLabel(selectedMemory.type) : '无' }}</strong>
               </div>
             </div>
           </article>
@@ -55,13 +54,13 @@
       <section class="panel registry-panel">
         <div class="section-title">
           <div>
-            <h2>Persona registry</h2>
-            <p>{{ filteredPersonas.length }} persona record(s) visible in {{ workspaceId }}.</p>
+            <h2>人格预设列表</h2>
+            <p>工作区 {{ workspaceId }} 中显示 {{ filteredPersonas.length }} 条人格预设。</p>
           </div>
           <div class="toolbar">
-            <input v-model="workspaceId" type="search" aria-label="Workspace id" placeholder="workspace id" />
-            <input v-model="personaQuery" type="search" aria-label="Search personas" placeholder="Search personas" />
-            <button type="button" @click="loadAll" :disabled="loading">Refresh</button>
+            <input v-model="workspaceId" type="search" aria-label="工作区 ID" placeholder="工作区 ID" />
+            <input v-model="personaQuery" type="search" aria-label="搜索人格预设" placeholder="搜索人格预设" />
+            <button type="button" @click="loadAll" :disabled="loading">刷新</button>
           </div>
         </div>
 
@@ -70,18 +69,18 @@
 
         <EmptyState
           v-if="filteredPersonas.length === 0"
-          title="No personas"
-          detail="Create a persona or adjust the workspace and search filters."
+          title="暂无人格预设"
+          detail="请创建人格预设，或调整工作区和搜索条件。"
         />
 
         <div v-else class="table-wrap">
           <table class="table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>State</th>
-                <th>Agents</th>
-                <th>Updated</th>
+                <th>名称</th>
+                <th>状态</th>
+                <th>智能体</th>
+                <th>更新时间</th>
               </tr>
             </thead>
             <tbody>
@@ -98,10 +97,10 @@
                 </td>
                 <td>
                   <span class="inline-status" :class="{ ok: persona.enabled, muted: !persona.enabled }">
-                    {{ persona.enabled ? 'Enabled' : 'Disabled' }}
+                    {{ persona.enabled ? '已启用' : '已禁用' }}
                   </span>
                 </td>
-                <td>{{ persona.agentNames.length || 'All' }}</td>
+                <td>{{ persona.agentNames.length || '全部' }}</td>
                 <td>{{ formatTime(persona.updatedAt) }}</td>
               </tr>
             </tbody>
@@ -111,46 +110,80 @@
         <form class="stacked-form persona-form" @submit.prevent="savePersona">
           <div class="section-title compact">
             <div>
-              <h2>{{ personaDraft.id ? 'Edit Persona' : 'Create Persona' }}</h2>
-              <p>Persona scope, tone, boundaries, and injected prompt template.</p>
+              <h2>{{ personaDraft.id ? '编辑人格预设' : '创建人格预设' }}</h2>
+              <p>配置人格作用范围、语气、边界和注入提示词。</p>
             </div>
-            <button type="button" @click="resetPersonaDraft">New</button>
+            <button type="button" @click="resetPersonaDraft">新建</button>
           </div>
           <div class="form-grid">
             <label>
-              <span>Name</span>
+              <span>名称</span>
               <input v-model="personaDraft.name" required />
             </label>
             <label>
-              <span>Agents</span>
-              <input v-model="personaAgentsText" placeholder="comma separated or blank for all" />
+              <span>智能体</span>
+              <input v-model="personaAgentsText" placeholder="用逗号分隔；留空表示全部" />
             </label>
             <label>
-              <span>Description</span>
+              <span>描述</span>
               <input v-model="personaDraft.description" />
             </label>
             <label>
-              <span>Tone</span>
+              <span>语气</span>
               <input v-model="personaDraft.tone" />
             </label>
             <label class="full-span">
-              <span>Boundaries</span>
-              <input v-model="personaBoundariesText" placeholder="comma separated boundaries" />
+              <span>行为边界</span>
+              <input v-model="personaBoundariesText" placeholder="用逗号分隔多个边界" />
             </label>
             <label class="full-span">
-              <span>System prompt template</span>
+              <span>系统提示词模板</span>
               <textarea v-model="personaDraft.systemPromptTemplate" class="compact-textarea"></textarea>
             </label>
+            <div class="full-span example-dialog-editor">
+              <div class="example-dialog-heading">
+                <div>
+                  <span>示例对话</span>
+                  <p>少样本示例会以用户/智能体消息的形式放在真实历史之前，不会写入聊天记录。</p>
+                </div>
+                <button type="button" :disabled="personaDraft.exampleDialogs.length >= 20" @click="addExampleDialog">
+                  添加示例
+                </button>
+              </div>
+              <p v-if="personaDraft.exampleDialogs.length === 0" class="muted">尚未配置示例。</p>
+              <article
+                v-for="(dialog, index) in personaDraft.exampleDialogs"
+                :key="index"
+                class="example-dialog-card"
+              >
+                <div class="example-dialog-title">
+                  <strong>示例 {{ index + 1 }}</strong>
+                  <div class="toolbar compact-actions">
+                    <button type="button" :disabled="index === 0" :aria-label="`上移示例 ${index + 1}`" @click="moveExampleDialog(index, -1)">↑</button>
+                    <button type="button" :disabled="index === personaDraft.exampleDialogs.length - 1" :aria-label="`下移示例 ${index + 1}`" @click="moveExampleDialog(index, 1)">↓</button>
+                    <button type="button" :aria-label="`移除示例 ${index + 1}`" @click="removeExampleDialog(index)">移除</button>
+                  </div>
+                </div>
+                <label>
+                  <span>用户</span>
+                  <textarea v-model="dialog.user" class="compact-textarea" maxlength="8000" required></textarea>
+                </label>
+                <label>
+                  <span>智能体</span>
+                  <textarea v-model="dialog.assistant" class="compact-textarea" maxlength="8000" required></textarea>
+                </label>
+              </article>
+            </div>
           </div>
           <div class="toolbar">
             <label class="check-row">
               <input v-model="personaDraft.enabled" type="checkbox" />
-              <span>Enabled</span>
+              <span>启用</span>
             </label>
             <button type="submit" class="primary" :disabled="savingPersona || personaDraft.name.trim().length === 0">
-              {{ savingPersona ? 'Saving' : 'Save Persona' }}
+              {{ savingPersona ? '保存中' : '保存人格预设' }}
             </button>
-            <button v-if="personaDraft.id" type="button" @click="deleteSelectedPersona" :disabled="savingPersona">Delete</button>
+            <button v-if="personaDraft.id" type="button" @click="deleteSelectedPersona" :disabled="savingPersona">删除</button>
           </div>
         </form>
       </section>
@@ -158,45 +191,57 @@
       <aside class="panel detail-panel detail-rail">
         <div class="section-title">
           <div>
-            <h2>{{ selectedPersona?.name ?? 'Persona detail rail' }}</h2>
-            <p>{{ selectedPersona ? selectedPersona.id : 'Select a persona to inspect injection inputs.' }}</p>
+            <h2>{{ selectedPersona?.name ?? '人格预设详情' }}</h2>
+            <p>{{ selectedPersona ? selectedPersona.id : '请选择人格预设以检查注入内容。' }}</p>
           </div>
         </div>
 
         <EmptyState
           v-if="!selectedPersona"
-          title="No persona selected"
-          detail="Choose a row to inspect tone, boundaries, and scoped agents."
+          title="未选择人格预设"
+          detail="请选择记录以检查语气、边界和适用智能体。"
         />
 
         <div v-else class="detail-stack">
           <article class="card memory-rail-card">
             <div class="detail-list">
               <div class="detail-item">
-                <span>Workspace</span>
+                <span>工作区</span>
                 <strong>{{ selectedPersona.workspaceId }}</strong>
               </div>
               <div class="detail-item">
-                <span>Tone</span>
-                <strong>{{ selectedPersona.tone || 'Not set' }}</strong>
+                <span>语气</span>
+                <strong>{{ selectedPersona.tone || '未设置' }}</strong>
               </div>
               <div class="detail-item">
-                <span>Agents</span>
+                <span>智能体</span>
                 <div class="chip-row">
                   <span v-for="agent in selectedPersona.agentNames" :key="agent" class="chip">{{ agent }}</span>
-                  <span v-if="selectedPersona.agentNames.length === 0" class="muted">All agents</span>
+                  <span v-if="selectedPersona.agentNames.length === 0" class="muted">全部智能体</span>
                 </div>
               </div>
               <div class="detail-item">
-                <span>Boundaries</span>
+                <span>行为边界</span>
                 <div class="chip-row">
                   <span v-for="boundary in selectedPersona.boundaries" :key="boundary" class="chip">{{ boundary }}</span>
-                  <span v-if="selectedPersona.boundaries.length === 0" class="muted">None</span>
+                  <span v-if="selectedPersona.boundaries.length === 0" class="muted">无</span>
                 </div>
               </div>
               <div class="detail-item">
-                <span>Prompt</span>
-                <pre class="code-block">{{ selectedPersona.systemPromptTemplate || 'No template configured.' }}</pre>
+                <span>提示词</span>
+                <pre class="code-block">{{ selectedPersona.systemPromptTemplate || '未配置模板。' }}</pre>
+              </div>
+              <div class="detail-item">
+                <span>示例对话</span>
+                <div v-if="selectedPersona.exampleDialogs.length" class="example-dialog-preview">
+                  <div v-for="(dialog, index) in selectedPersona.exampleDialogs" :key="index">
+                    <strong>用户</strong>
+                    <p>{{ dialog.user }}</p>
+                    <strong>智能体</strong>
+                    <p>{{ dialog.assistant }}</p>
+                  </div>
+                </div>
+                <span v-else class="muted">无</span>
               </div>
             </div>
           </article>
@@ -208,44 +253,44 @@
       <section class="panel registry-panel">
         <div class="section-title">
           <div>
-            <h2>Memory workbench</h2>
-            <p>{{ filteredMemories.length }} memory record(s) visible for the current scope.</p>
+            <h2>记忆工作台</h2>
+            <p>当前范围内显示 {{ filteredMemories.length }} 条记忆。</p>
           </div>
           <div class="toolbar">
-            <input v-model="memoryQuery" type="search" aria-label="Search memory" placeholder="Search memory" />
-            <select v-model="memoryTypeFilter" aria-label="Memory type">
-              <option value="all">All types</option>
-              <option value="FACT">Fact</option>
-              <option value="PREFERENCE">Preference</option>
-              <option value="EVENT">Event</option>
-              <option value="SUMMARY">Summary</option>
+            <input v-model="memoryQuery" type="search" aria-label="搜索记忆" placeholder="搜索记忆" />
+            <select v-model="memoryTypeFilter" aria-label="记忆类型">
+              <option value="all">全部类型</option>
+              <option value="FACT">事实</option>
+              <option value="PREFERENCE">偏好</option>
+              <option value="EVENT">事件</option>
+              <option value="SUMMARY">摘要</option>
             </select>
-            <button type="button" @click="searchMemory" :disabled="loadingMemory || memoryQuery.trim().length === 0">Search</button>
-            <button type="button" @click="expireMemory" :disabled="loadingMemory">Expire</button>
+            <button type="button" @click="searchMemory" :disabled="loadingMemory || memoryQuery.trim().length === 0">搜索</button>
+            <button type="button" @click="expireMemory" :disabled="loadingMemory">清理过期</button>
           </div>
         </div>
 
         <div class="scope-grid">
-          <input v-model="memoryScope.platformId" placeholder="platform id" aria-label="Platform id" />
-          <input v-model="memoryScope.sessionId" placeholder="session id" aria-label="Session id" />
-          <input v-model="memoryScope.userId" placeholder="user id" aria-label="User id" />
-          <input v-model="memoryScope.agentName" placeholder="agent name" aria-label="Agent name" />
+          <input v-model="memoryScope.platformId" placeholder="平台 ID" aria-label="平台 ID" />
+          <input v-model="memoryScope.sessionId" placeholder="会话 ID" aria-label="会话 ID" />
+          <input v-model="memoryScope.userId" placeholder="用户 ID" aria-label="用户 ID" />
+          <input v-model="memoryScope.agentName" placeholder="智能体名称" aria-label="智能体名称" />
         </div>
 
         <EmptyState
           v-if="filteredMemories.length === 0"
-          title="No visible memories"
-          detail="Save a memory or adjust scope filters to list scoped records."
+          title="暂无可见记忆"
+          detail="请保存记忆或调整范围筛选条件。"
         />
 
         <div v-else class="table-wrap">
           <table class="table">
             <thead>
               <tr>
-                <th>Content</th>
-                <th>Scope</th>
-                <th>Type</th>
-                <th>Confidence</th>
+                <th>内容</th>
+                <th>范围</th>
+                <th>类型</th>
+                <th>置信度</th>
               </tr>
             </thead>
             <tbody>
@@ -261,7 +306,7 @@
                   <p class="muted">{{ memory.tags.join(', ') || memory.id }}</p>
                 </td>
                 <td>{{ memory.scope }}</td>
-                <td>{{ memory.type }}</td>
+                <td>{{ memoryTypeLabel(memory.type) }}</td>
                 <td>{{ Math.round(memory.confidence * 100) }}%</td>
               </tr>
             </tbody>
@@ -271,45 +316,45 @@
         <form class="stacked-form persona-form" @submit.prevent="saveMemory">
           <div class="section-title compact">
             <div>
-              <h2>Save Memory</h2>
-              <p>Write a scoped fact, preference, event, or summary into the runtime store.</p>
+              <h2>保存记忆</h2>
+              <p>将限定范围的事实、偏好、事件或摘要写入运行时存储。</p>
             </div>
           </div>
           <div class="form-grid">
             <label>
-              <span>Scope</span>
+              <span>范围</span>
               <select v-model="memoryDraft.scope">
-                <option value="GLOBAL">Global</option>
-                <option value="PLATFORM">Platform</option>
-                <option value="SESSION">Session</option>
-                <option value="USER">User</option>
-                <option value="AGENT">Agent</option>
+                <option value="GLOBAL">全局</option>
+                <option value="PLATFORM">平台</option>
+                <option value="SESSION">会话</option>
+                <option value="USER">用户</option>
+                <option value="AGENT">智能体</option>
               </select>
             </label>
             <label>
-              <span>Type</span>
+              <span>类型</span>
               <select v-model="memoryDraft.type">
-                <option value="FACT">Fact</option>
-                <option value="PREFERENCE">Preference</option>
-                <option value="EVENT">Event</option>
-                <option value="SUMMARY">Summary</option>
+                <option value="FACT">事实</option>
+                <option value="PREFERENCE">偏好</option>
+                <option value="EVENT">事件</option>
+                <option value="SUMMARY">摘要</option>
               </select>
             </label>
             <label>
-              <span>Tags</span>
-              <input v-model="memoryTagsText" placeholder="comma separated" />
+              <span>标签</span>
+              <input v-model="memoryTagsText" placeholder="用逗号分隔" />
             </label>
             <label>
-              <span>Confidence</span>
+              <span>置信度</span>
               <input v-model.number="memoryDraft.confidence" type="number" min="0" max="1" step="0.05" />
             </label>
             <label class="full-span">
-              <span>Content</span>
+              <span>内容</span>
               <textarea v-model="memoryDraft.content" class="compact-textarea" required></textarea>
             </label>
           </div>
           <button type="submit" class="primary" :disabled="savingMemory || memoryDraft.content.trim().length === 0">
-            {{ savingMemory ? 'Saving' : 'Save Memory' }}
+            {{ savingMemory ? '保存中' : '保存记忆' }}
           </button>
         </form>
       </section>
@@ -317,54 +362,54 @@
       <aside class="panel detail-panel detail-rail">
         <div class="section-title">
           <div>
-            <h2>{{ selectedMemory ? selectedMemory.type : 'Memory detail rail' }}</h2>
-            <p>{{ selectedMemory ? selectedMemory.id : 'Select a memory row or run a search.' }}</p>
+            <h2>{{ selectedMemory ? memoryTypeLabel(selectedMemory.type) : '记忆详情' }}</h2>
+            <p>{{ selectedMemory ? selectedMemory.id : '请选择记忆记录或运行搜索。' }}</p>
           </div>
         </div>
 
         <EmptyState
           v-if="!selectedMemory"
-          title="No memory selected"
-          detail="Choose a memory row or run a scoped search."
+          title="未选择记忆"
+          detail="请选择记忆记录或运行范围搜索。"
         />
 
         <div v-else class="detail-stack">
           <article class="card memory-rail-card">
             <div class="detail-list">
               <div class="detail-item">
-                <span>Content</span>
+                <span>内容</span>
                 <strong>{{ selectedMemory.content }}</strong>
               </div>
               <div class="detail-item">
-                <span>Scope</span>
+                <span>范围</span>
                 <div class="chip-row">
-                  <span class="chip">{{ selectedMemory.scope }}</span>
-                  <span v-if="selectedMemory.platformId" class="chip">platform {{ selectedMemory.platformId }}</span>
-                  <span v-if="selectedMemory.sessionId" class="chip">session {{ selectedMemory.sessionId }}</span>
-                  <span v-if="selectedMemory.userId" class="chip">user {{ selectedMemory.userId }}</span>
-                  <span v-if="selectedMemory.agentName" class="chip">agent {{ selectedMemory.agentName }}</span>
+                  <span class="chip">{{ memoryScopeLabel(selectedMemory.scope) }}</span>
+                  <span v-if="selectedMemory.platformId" class="chip">平台 {{ selectedMemory.platformId }}</span>
+                  <span v-if="selectedMemory.sessionId" class="chip">会话 {{ selectedMemory.sessionId }}</span>
+                  <span v-if="selectedMemory.userId" class="chip">用户 {{ selectedMemory.userId }}</span>
+                  <span v-if="selectedMemory.agentName" class="chip">智能体 {{ selectedMemory.agentName }}</span>
                 </div>
               </div>
               <div class="detail-item">
-                <span>Tags</span>
+                <span>标签</span>
                 <div class="chip-row">
                   <span v-for="tag in selectedMemory.tags" :key="tag" class="chip">{{ tag }}</span>
-                  <span v-if="selectedMemory.tags.length === 0" class="muted">None</span>
+                  <span v-if="selectedMemory.tags.length === 0" class="muted">无</span>
                 </div>
               </div>
               <div class="detail-item">
-                <span>Updated</span>
+                <span>更新时间</span>
                 <strong>{{ formatTime(selectedMemory.updatedAt) }}</strong>
               </div>
-              <button type="button" @click="deleteSelectedMemory">Delete Memory</button>
+              <button type="button" @click="deleteSelectedMemory">删除记忆</button>
             </div>
           </article>
 
           <div v-if="searchResults.length" class="search-results">
             <div class="section-title compact">
               <div>
-                <h2>Search results</h2>
-                <p>{{ searchResults.length }} matched record(s).</p>
+                <h2>搜索结果</h2>
+                <p>匹配 {{ searchResults.length }} 条记录。</p>
               </div>
             </div>
             <button
@@ -423,6 +468,7 @@ const personaDraft = reactive<PersonaUpsertDto>({
   tone: '',
   boundaries: [],
   systemPromptTemplate: '',
+  exampleDialogs: [],
   enabled: true,
   agentNames: [],
 });
@@ -477,27 +523,27 @@ const selectedMemory = computed(
 
 const memorySignals = computed(() => [
   {
-    label: 'Personas',
+    label: '人格预设',
     value: String(personas.value.length),
-    detail: `${enabledPersonas.value} enabled persona overlay(s) in the current registry.`,
+    detail: `当前列表中有 ${enabledPersonas.value} 个已启用人格预设。`,
     tone: personas.value.length > 0 ? 'ok' : 'muted',
   },
   {
-    label: 'Visible memories',
+    label: '可见记忆',
     value: String(memories.value.length),
-    detail: 'Scoped memory records currently loaded for the active filter.',
+    detail: '当前筛选条件下已加载的范围记忆记录。',
     tone: memories.value.length > 0 ? 'ok' : 'muted',
   },
   {
-    label: 'Search matches',
+    label: '搜索匹配',
     value: String(searchResults.value.length),
-    detail: searchResults.value.length > 0 ? 'Scoped relevance test results are available.' : 'Run a search to inspect ranking behavior.',
+    detail: searchResults.value.length > 0 ? '可查看范围相关性测试结果。' : '运行搜索以检查排序效果。',
     tone: searchResults.value.length > 0 ? 'warn' : 'muted',
   },
   {
-    label: 'Workspace',
+    label: '工作区',
     value: workspaceId.value,
-    detail: 'Current workspace scope for persona and memory operations.',
+    detail: '人格和记忆操作当前使用的工作区范围。',
     tone: 'muted',
   },
 ]);
@@ -547,6 +593,7 @@ function selectPersona(persona: Persona) {
     tone: persona.tone,
     boundaries: [...persona.boundaries],
     systemPromptTemplate: persona.systemPromptTemplate,
+    exampleDialogs: persona.exampleDialogs.map((dialog) => ({ ...dialog })),
     enabled: persona.enabled,
     agentNames: [...persona.agentNames],
   });
@@ -564,11 +611,28 @@ function resetPersonaDraft() {
     tone: '',
     boundaries: [],
     systemPromptTemplate: '',
+    exampleDialogs: [],
     enabled: true,
     agentNames: [],
   });
   personaAgentsText.value = '';
   personaBoundariesText.value = '';
+}
+
+function addExampleDialog() {
+  if (personaDraft.exampleDialogs.length >= 20) return;
+  personaDraft.exampleDialogs.push({ user: '', assistant: '' });
+}
+
+function removeExampleDialog(index: number) {
+  personaDraft.exampleDialogs.splice(index, 1);
+}
+
+function moveExampleDialog(index: number, offset: -1 | 1) {
+  const target = index + offset;
+  if (target < 0 || target >= personaDraft.exampleDialogs.length) return;
+  const [dialog] = personaDraft.exampleDialogs.splice(index, 1);
+  personaDraft.exampleDialogs.splice(target, 0, dialog);
 }
 
 async function savePersona() {
@@ -583,7 +647,7 @@ async function savePersona() {
       boundaries: splitList(personaBoundariesText.value),
     };
     const saved = body.id ? await dashboardApi.updatePersona(body.id, body) : await dashboardApi.savePersona(body);
-    notice.value = `Saved persona ${saved.name}.`;
+    notice.value = `已保存人格预设 ${saved.name}。`;
     await loadAll();
     selectPersona(saved);
   } catch (cause) {
@@ -596,7 +660,7 @@ async function savePersona() {
 async function deleteSelectedPersona() {
   if (!personaDraft.id) return;
   await dashboardApi.deletePersona(personaDraft.id);
-  notice.value = `Deleted persona ${personaDraft.name}.`;
+  notice.value = `已删除人格预设 ${personaDraft.name}。`;
   resetPersonaDraft();
   await loadAll();
 }
@@ -618,7 +682,7 @@ async function saveMemory() {
       tags: splitList(memoryTagsText.value),
       confidence: memoryDraft.confidence,
     });
-    notice.value = `Saved memory ${saved.id}.`;
+    notice.value = `已保存记忆 ${saved.id}。`;
     memoryDraft.content = '';
     memoryTagsText.value = '';
     await loadMemories();
@@ -662,13 +726,13 @@ async function deleteSelectedMemory() {
     userId: normalize(memoryScope.userId),
     agentName: normalize(memoryScope.agentName),
   });
-  notice.value = `Deleted memory ${selectedMemory.value.id}.`;
+  notice.value = `已删除记忆 ${selectedMemory.value.id}。`;
   await loadMemories();
 }
 
 async function expireMemory() {
   const response = await dashboardApi.expireMemory();
-  notice.value = `Expired ${response.expired} memory record(s).`;
+  notice.value = `已清理 ${response.expired} 条过期记忆。`;
   await loadMemories();
 }
 
@@ -683,8 +747,29 @@ function normalize(value: string) {
   return value.trim() || undefined;
 }
 
+function memoryTypeLabel(type: MemoryType) {
+  const labels: Record<MemoryType, string> = {
+    FACT: '事实',
+    PREFERENCE: '偏好',
+    EVENT: '事件',
+    SUMMARY: '摘要',
+  };
+  return labels[type];
+}
+
+function memoryScopeLabel(scope: MemoryScope) {
+  const labels: Record<MemoryScope, string> = {
+    GLOBAL: '全局',
+    PLATFORM: '平台',
+    SESSION: '会话',
+    USER: '用户',
+    AGENT: '智能体',
+  };
+  return labels[scope];
+}
+
 function formatTime(value: number) {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat('zh-CN', {
     month: 'short',
     day: '2-digit',
     hour: '2-digit',
@@ -809,6 +894,40 @@ onMounted(() => {
 .memory-rail-card {
   border-color: #ddd4c5;
   background: rgba(255, 252, 246, 0.92);
+}
+
+.example-dialog-editor,
+.example-dialog-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.example-dialog-heading,
+.example-dialog-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.example-dialog-heading p,
+.example-dialog-preview p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.example-dialog-card,
+.example-dialog-preview > div {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.compact-actions {
+  gap: 6px;
 }
 
 .rail-list {

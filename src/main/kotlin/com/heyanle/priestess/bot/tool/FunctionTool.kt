@@ -15,6 +15,9 @@ abstract class FunctionTool {
      */
     abstract val schema: ToolSchema
 
+    /** Controls whether the Agent runner may replace a large result with a reference. */
+    open val resultMaterialization: ToolResultMaterialization = ToolResultMaterialization.AUTO
+
     /**
      * Execute this tool with the given arguments.
      *
@@ -23,4 +26,9 @@ abstract class FunctionTool {
      * @return ToolResult indicating success or failure.
      */
     abstract suspend fun execute(context: AgentToolContext, args: Map<String, String>): ToolResult
+}
+
+enum class ToolResultMaterialization {
+    AUTO,
+    INLINE,
 }

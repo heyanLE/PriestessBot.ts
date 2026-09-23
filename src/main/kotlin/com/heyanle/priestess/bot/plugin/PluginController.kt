@@ -1,6 +1,7 @@
 package com.heyanle.priestess.bot.plugin
 
-import com.heyanle.priestess.bot.config.ConfigCase
+import com.heyanle.priestess.bot.config.runtime.RuntimeConfigurationCase
+import com.heyanle.priestess.bot.config.runtime.pluginConfig
 import com.heyanle.priestess.bot.core.controller.BaseController
 import com.heyanle.priestess.bot.provider.ProviderCase
 import com.heyanle.priestess.bot.tool.ToolCase
@@ -13,7 +14,7 @@ import java.net.URL
  * 插件模块控制器，负责插件发现、加载生命周期和运行时上下文管理。
  */
 class PluginController(
-    private val configCase: ConfigCase,
+    private val runtimeConfig: RuntimeConfigurationCase,
     private val extensionRegistry: PluginExtensionRegistry,
     private val toolCase: ToolCase,
     private val providerCase: ProviderCase,
@@ -28,14 +29,14 @@ class PluginController(
     private val runtimes = linkedMapOf<String, PluginRuntime>()
 
     init {
-        val cfg = configCase.current().plugins
+        val cfg = runtimeConfig.current().pluginConfig()
         if (cfg.enabled && cfg.autoDiscover) {
             discover()
         }
     }
 
     fun discover(): List<PluginDescriptor> {
-        val dir = File(configCase.current().plugins.directory)
+        val dir = File(runtimeConfig.current().pluginConfig().directory)
         if (!dir.exists()) {
             dir.mkdirs()
         }

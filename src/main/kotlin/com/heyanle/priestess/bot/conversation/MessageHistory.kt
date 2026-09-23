@@ -195,6 +195,7 @@ class MessageHistory(
                 sessionId = this[ConversationsTable.sessionId],
                 createdAt = this[ConversationsTable.createdAt],
                 updatedAt = this[ConversationsTable.updatedAt],
+                agentId = this[ConversationsTable.agentId],
             ),
             snippet = "",
         )

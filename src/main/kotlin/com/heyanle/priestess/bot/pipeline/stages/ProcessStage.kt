@@ -39,20 +39,25 @@ class ProcessStage(
         }
 
         val agent = agentContext.agent
+        ctx.executionTrace?.identify(
+            workspaceId = ctx.effectiveWorkspaceSnapshot?.config?.id.orEmpty(), agent = agent.name,
+            provider = agent.providerName, model = agent.model,
+        )
         val preferredProviderName = agentContext.metadata["providerName"]
-        val provider = preferredProviderName
             ?.takeIf { it.isNotBlank() }
-            ?.let { providerCase.getByName(it) }
-            ?: providerCase.getByName(agent.model)
-            ?: providerCase.getAll().firstOrNull()
+            ?: agent.providerName.takeIf { it.isNotBlank() }
+        val effectiveRuntime = checkNotNull(ctx.effectiveRuntimeSnapshot) { "Effective configuration was not pinned" }
+        val provider = preferredProviderName
+            ?.let(effectiveRuntime.providers::get)
+            ?.let(providerCase::getEffective)
 
         if (provider == null) {
-            logger.error { "[PIPELINE-992] No provider available for model '${agent.model}'" }
-            ctx.agentResponse = AgentResponse.Error("No LLM provider available")
+            logger.error { "[PIPELINE-992] Configured provider '${preferredProviderName.orEmpty()}' is unavailable for agent '${agent.name}'" }
+            ctx.agentResponse = AgentResponse.Error("Configured LLM provider '${preferredProviderName.orEmpty()}' is unavailable")
             return null
         }
 
-        agentContext.messages.add(ConversationMessage.user(ctx.textContent))
+        agentContext.messages.add(ConversationMessage.user(ctx.modelUserContent))
         logger.info {
             "[PIPELINE-210] Process selected provider=${provider.metadata.name}, agent=${agent.name}, " +
                 "model=${agent.model}, messages=${agentContext.messages.size}, tools=${toolCase.size()}"

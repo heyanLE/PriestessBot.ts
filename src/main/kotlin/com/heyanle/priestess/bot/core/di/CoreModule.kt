@@ -4,10 +4,16 @@ import com.heyanle.priestess.bot.agent.context.ContextManager
 import com.heyanle.priestess.bot.agent.context.TokenCounter
 import com.heyanle.priestess.bot.agent.AgentCase
 import com.heyanle.priestess.bot.agent.AgentController
-import com.heyanle.priestess.bot.agent.orchestration.SubAgentOrchestrator
 import com.heyanle.priestess.bot.PriestessRuntime
-import com.heyanle.priestess.bot.config.ConfigCase
-import com.heyanle.priestess.bot.config.ConfigController
+import com.heyanle.priestess.bot.config.resolve.ConfigurableToolDescriptor
+import com.heyanle.priestess.bot.config.resolve.ConfigurationCompiler
+import com.heyanle.priestess.bot.config.runtime.ConfigurationRuntimeService
+import com.heyanle.priestess.bot.config.runtime.EffectiveConfigStore
+import com.heyanle.priestess.bot.config.runtime.RuntimeConfigurationCase
+import com.heyanle.priestess.bot.config.source.ProcessConfigurationPath
+import com.heyanle.priestess.bot.config.runtime.databaseConfig
+import com.heyanle.priestess.bot.config.runtime.permissionConfig
+import com.heyanle.priestess.bot.config.runtime.serverConfig
 import com.heyanle.priestess.bot.conversation.ConversationCase
 import com.heyanle.priestess.bot.conversation.ConversationController
 import com.heyanle.priestess.bot.conversation.MessageHistory
@@ -33,11 +39,15 @@ import com.heyanle.priestess.bot.plugin.PluginExtensionRegistry
 import com.heyanle.priestess.bot.plugin.PluginController
 import com.heyanle.priestess.bot.platform.PlatformCase
 import com.heyanle.priestess.bot.platform.PlatformController
+import com.heyanle.priestess.bot.platform.PlatformRegistry
+import com.heyanle.priestess.bot.platform.registerBuiltinPlatforms
+import com.heyanle.priestess.bot.platform.adapters.weixin.WeixinQrLoginService
 import com.heyanle.priestess.bot.provider.ProviderCase
 import com.heyanle.priestess.bot.provider.ProviderController
 import com.heyanle.priestess.bot.reminder.ReminderCase
 import com.heyanle.priestess.bot.reminder.ReminderController
 import com.heyanle.priestess.bot.server.DashboardService
+import com.heyanle.priestess.bot.server.ConfigurationManagementService
 import com.heyanle.priestess.bot.server.PriestessBotServer
 import com.heyanle.priestess.bot.server.RuntimeHealthProvider
 import com.heyanle.priestess.bot.server.ServerCase
@@ -50,38 +60,54 @@ import com.heyanle.priestess.bot.tool.ToolController
 import com.heyanle.priestess.bot.tool.ToolExecutor
 import com.heyanle.priestess.bot.tool.ToolResultOverflowStore
 import com.heyanle.priestess.bot.tool.builtin.registerBuiltinTools
-import com.heyanle.priestess.bot.workspace.ConfigBackedWorkspaceConfigSource
-import com.heyanle.priestess.bot.workspace.RealWorkspaceMcpToolResolver
+import com.heyanle.priestess.bot.workspace.RealMcpServerConnector
 import com.heyanle.priestess.bot.workspace.WorkspaceCase
-import com.heyanle.priestess.bot.workspace.WorkspaceConfigSource
 import com.heyanle.priestess.bot.workspace.WorkspaceController
 import org.koin.dsl.module
+import org.koin.core.qualifier.named
 
 val coreModule = module {
 
-    single { ConfigController() }
-    single { ConfigCase(controller = get()) }
+    single { EffectiveConfigStore() }
+    single {
+        val scope = this
+        RuntimeConfigurationCase(
+            effectiveStore = get(),
+            ensureStarted = {
+                val result = scope.get<ConfigurationRuntimeService>().startup()
+                check(result.success) {
+                    "Configuration activation failed: " + result.diagnostics.joinToString { "${it.code}: ${it.message}" }
+                }
+            },
+        )
+    }
+    single { ConfigurationCompiler(mcpConnector = RealMcpServerConnector()) }
     single { ObservabilityController() }
     single { ObservabilityCase(controller = get()) }
 
     single {
-        val configCase: ConfigCase = get()
-        DatabaseController(dbPath = configCase.current().database.path)
+        DatabaseController(dbPath = get<RuntimeConfigurationCase>().current().databaseConfig().path)
     }
     single { DatabaseCase(controller = get()) }
+    single(named("platformDatabase")) {
+        val application = checkNotNull(get<RuntimeConfigurationCase>().current().application)
+        val root = com.heyanle.priestess.bot.config.application.ApplicationConfigurationSource()
+            .resolveDirectory(ProcessConfigurationPath.current().path, application.platformDirectory)
+        DatabaseCase(DatabaseController(root.resolve("resources.sqlite").toString()))
+    }
 
     single { ConversationController(db = get<DatabaseCase>()) }
     single { MessageHistory(db = get<DatabaseCase>()) }
     single { ConversationCase(controller = get(), history = get()) }
     single { KnowledgeController(db = get<DatabaseCase>()) }
     single { KnowledgeCase(controller = get()) }
-    single { MemoryController(db = get<DatabaseCase>()) }
+    single { MemoryController(db = get(named("platformDatabase"))) }
     single { MemoryCase(controller = get()) }
-    single { PersonaController(db = get<DatabaseCase>()) }
+    single { PersonaController(db = get(named("platformDatabase"))) }
     single { PersonaCase(controller = get()) }
     single { PersonaMemoryInjector(personaCase = get(), memoryCase = get()) }
     single<PermissionDeniedMessageResolver> { PersonaPermissionDeniedMessageResolver(personaCase = get()) }
-    single { PermissionResolver { get<ConfigCase>().current().permission } }
+    single { PermissionResolver { get<RuntimeConfigurationCase>().current().permissionConfig() } }
     single { CommandCase() }
     single { ReminderController(db = get<DatabaseCase>()) }
     single { ReminderCase(controller = get()) }
@@ -89,6 +115,7 @@ val coreModule = module {
     single {
         val controller = ToolController()
         val scope = this
+        registerBuiltinPlatforms()
         val toolCase = ToolCase(
             controller = controller,
             executorProvider = {
@@ -112,7 +139,7 @@ val coreModule = module {
         toolCase
     }
 
-    single { ProviderController(configCase = get()) }
+    single { ProviderController(runtimeConfig = get()) }
     single { ProviderCase(controller = get()) }
 
     single { TokenCounter() }
@@ -120,22 +147,35 @@ val coreModule = module {
     single { ContextManager(tokenCounter = get()) }
     single { AgentController() }
     single { AgentCase(controller = get(), contextManager = get(), overflowStore = get()) }
-    single {
-        SubAgentOrchestrator(
-            agentCase = get(),
-            providerCase = get(),
-            toolCase = get(),
-        )
-    }
     single { SkillController().apply { register(DefaultSkill()) } }
     single { SkillCase(controller = get()) }
-    single<WorkspaceConfigSource> { ConfigBackedWorkspaceConfigSource(configCase = get()) }
+    single {
+        val scope = this
+        ConfigurationRuntimeService(
+            configPath = ProcessConfigurationPath.current().path,
+            compiler = get(),
+            store = get(),
+            registeredTools = {
+                val runtime = scope.get<ToolCase>().getRegisteredTools().map { registered ->
+                    ConfigurableToolDescriptor(registered.schema.name, registered.schema.riskLevel, registered.schema.defaultEnabled)
+                }
+                val platforms = PlatformRegistry.getDeclaredTools().map { tool ->
+                    ConfigurableToolDescriptor(tool.schema.name, tool.schema.riskLevel, tool.schema.defaultEnabled)
+                }
+                (runtime + platforms).distinctBy { it.id }
+            },
+            availableSkills = { scope.get<SkillCase>().getAll().mapTo(linkedSetOf()) { it.name } },
+            applicationSource = com.heyanle.priestess.bot.config.application.ApplicationConfigurationSource(),
+        )
+    }
+    single { ConfigurationManagementService(runtime = get()) }
+    single { com.heyanle.priestess.bot.server.ApplicationManagementService(runtime = get(), personas = get(), memories = get()) }
+    single { com.heyanle.priestess.bot.resources.AgentSkillCatalog(runtime = get(), sourcePath = ProcessConfigurationPath.current().path) }
+    single { com.heyanle.priestess.bot.observability.trace.ExecutionTraceController(db = get()) }
     single {
         WorkspaceController(
-            source = get(),
-            toolCase = get(),
-            skillCase = get(),
-            mcpToolResolver = RealWorkspaceMcpToolResolver(),
+            effectiveStore = get(),
+            configurationRuntime = get(),
         )
     }
     single { WorkspaceCase(controller = get()) }
@@ -143,7 +183,7 @@ val coreModule = module {
     single { PluginExtensionRegistry() }
     single {
         PluginController(
-            configCase = get(),
+            runtimeConfig = get(),
             extensionRegistry = get(),
             toolCase = get(),
             providerCase = get(),
@@ -153,19 +193,20 @@ val coreModule = module {
 
     single {
         PipelineController(
-            configCase = get(),
+            runtimeConfig = get(),
             conversationCase = get(),
             agentCase = get(),
             providerCase = get(),
             toolCase = get(),
             skillCase = get(),
-            subAgentOrchestrator = get(),
-            workspaceCase = get(),
             personaMemoryInjector = get(),
             commandCase = get(),
             permissionResolver = get(),
             permissionDeniedMessageResolver = get(),
             observabilityCase = get(),
+            effectiveConfigStore = get(),
+            executionTraces = get(),
+            agentSkillCatalog = get(),
         )
     }
     single { PipelineCase(controller = get()) }
@@ -177,21 +218,22 @@ val coreModule = module {
             controllerProvider = { scope.get<PlatformController>() },
         )
     }
-    single { PlatformController(configCase = get(), platformCase = get()) }
+    single { PlatformController(runtimeConfig = get(), platformCase = get()) }
+    single { WeixinQrLoginService(runtimeConfig = get(), platformCase = get()) }
 
     single {
         RuntimeHealthProvider(
-            configCase = get(),
             platformCase = get(),
             providerCase = get(),
             toolCase = get(),
             pluginCase = get(),
+            configurationRuntime = get(),
+            runtimeConfig = get(),
         )
     }
 
     single {
         DashboardService(
-            configCase = get(),
             platformCase = get(),
             providerCase = get(),
             toolCase = get(),
@@ -199,18 +241,21 @@ val coreModule = module {
             pluginCase = get(),
             agentCase = get(),
             knowledgeCase = get(),
-            subAgentOrchestrator = get(),
             observabilityCase = get(),
             healthProvider = get(),
             workspaceCase = get(),
             personaCase = get(),
             memoryCase = get(),
-            personaMemoryInjector = get(),
+            configurationManagement = get(),
+            pipelineCase = get(),
+            weixinQrLoginService = get(),
+            applicationManagement = get(),
+            agentSkillCatalog = get(),
+            executionTraces = get(),
         )
     }
     single {
-        val configCase: ConfigCase = get()
-        PriestessBotServer(config = configCase.current().server, service = get())
+        PriestessBotServer(config = get<RuntimeConfigurationCase>().current().serverConfig(), service = get())
     }
     single { ServerController(server = get()) }
     single { ServerCase(controller = get(), healthProvider = get()) }
@@ -226,8 +271,11 @@ val coreModule = module {
             workspaceCase = get(),
             observabilityCase = get(),
             databaseCase = get(),
-            configCase = get(),
             overflowStore = get(),
+            configurationRuntimeService = get(),
+            effectiveConfigStore = get(),
+            weixinQrLoginService = get(),
+            platformResourceDatabase = get(named("platformDatabase")),
         )
     }
 }

@@ -4,14 +4,13 @@
       <div class="governance-grid">
         <div class="governance-copy">
           <div class="governance-band">
-            <span>Assets</span>
-            <span>Tools</span>
+            <span>资源</span>
+            <span>工具</span>
           </div>
 
-          <h2>Runtime tool registry</h2>
+          <h2>运行时工具列表</h2>
           <p>
-            Review callable surfaces, explicit allow and deny posture, and risk pressure from one
-            structured registry before requests fan into the runtime.
+            在请求进入运行时前，集中检查可调用能力、允许/拒绝状态和风险等级。
           </p>
 
           <div class="grid governance-signal-grid">
@@ -27,23 +26,23 @@
           <article class="card rail-card">
             <div class="section-title compact">
               <div>
-                <h3>What matters here</h3>
-                <p>Keep scope, risk, and overrides readable before changing tool policy.</p>
+                <h3>检查重点</h3>
+                <p>修改工具策略前，确认作用范围、风险和覆盖设置。</p>
               </div>
             </div>
 
             <div class="rail-list">
               <div class="rail-item">
-                <span>Policy posture</span>
+                <span>策略状态</span>
                 <strong>{{ policyPosture }}</strong>
               </div>
               <div class="rail-item">
-                <span>Audit markers</span>
-                <strong>{{ auditedCount }} tools carry review metadata</strong>
+                <span>审计标记</span>
+                <strong>{{ auditedCount }} 个工具包含审查元数据</strong>
               </div>
               <div class="rail-item">
-                <span>Default-off lanes</span>
-                <strong>{{ defaultOffCount }} restricted by default</strong>
+                <span>默认关闭</span>
+                <strong>{{ defaultOffCount }} 个工具默认受限</strong>
               </div>
             </div>
           </article>
@@ -51,8 +50,8 @@
           <article class="card rail-card">
             <div class="section-title compact">
               <div>
-                <h3>Source sweep</h3>
-                <p>Registry coverage by tool origin.</p>
+                <h3>来源分布</h3>
+                <p>按工具来源统计配置覆盖情况。</p>
               </div>
             </div>
 
@@ -71,8 +70,8 @@
       <section class="panel registry-panel">
         <div class="section-title">
           <div>
-            <h2>Tool registry</h2>
-            <p>{{ filteredTools.length }} of {{ store.tools.length }} tools visible after control filters.</p>
+            <h2>工具列表</h2>
+            <p>筛选后显示 {{ filteredTools.length }}/{{ store.tools.length }} 个工具。</p>
           </div>
           <div class="toolbar">
             <span class="inline-status" :class="registryStatus.tone">{{ registryStatus.label }}</span>
@@ -81,38 +80,38 @@
 
         <div class="control-strip">
           <label class="control-field search-field">
-            <span>Search</span>
-            <input v-model="query" type="search" placeholder="Name or description" />
+            <span>搜索</span>
+            <input v-model="query" type="search" placeholder="名称或描述" />
           </label>
 
           <label class="control-field">
-            <span>Source</span>
+            <span>来源</span>
             <select v-model="sourceFilter">
-              <option value="all">All sources</option>
-              <option value="BUILTIN">Built-in</option>
-              <option value="PLUGIN">Plugin</option>
+              <option value="all">全部来源</option>
+              <option value="BUILTIN">内置</option>
+              <option value="PLUGIN">插件</option>
               <option value="MCP">MCP</option>
             </select>
           </label>
 
           <label class="control-field">
-            <span>Risk lane</span>
+            <span>风险等级</span>
             <select v-model="riskFilter">
-              <option value="all">All risks</option>
-              <option value="SAFE_READ">Safe read</option>
-              <option value="SESSION_ACTION">Session action</option>
-              <option value="EXTERNAL_READ">External read</option>
-              <option value="STATE_WRITE">State write</option>
-              <option value="HIGH_RISK">High risk</option>
+              <option value="all">全部风险</option>
+              <option value="SAFE_READ">安全读取</option>
+              <option value="SESSION_ACTION">会话操作</option>
+              <option value="EXTERNAL_READ">外部读取</option>
+              <option value="STATE_WRITE">状态写入</option>
+              <option value="HIGH_RISK">高风险</option>
             </select>
           </label>
 
           <label class="control-field">
-            <span>Policy state</span>
+            <span>策略状态</span>
             <select v-model="enabledFilter">
-              <option value="all">All states</option>
-              <option value="enabled">Allowed</option>
-              <option value="disabled">Denied</option>
+              <option value="all">全部状态</option>
+              <option value="enabled">允许</option>
+              <option value="disabled">拒绝</option>
             </select>
           </label>
         </div>
@@ -122,20 +121,20 @@
 
         <EmptyState
           v-if="filteredTools.length === 0"
-          title="No matching tools"
-          detail="Adjust the search or control strip to widen the registry view."
+          title="没有匹配工具"
+          detail="请调整搜索内容或筛选条件。"
         />
 
         <div v-else class="table-wrap governance-table-wrap">
           <table class="table governance-table">
             <thead>
               <tr>
-                <th>Tool</th>
-                <th>Source</th>
-                <th>Risk</th>
-                <th>Posture</th>
-                <th>Contract</th>
-                <th>Action</th>
+                <th>工具</th>
+                <th>来源</th>
+                <th>风险</th>
+                <th>策略</th>
+                <th>调用约束</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -161,15 +160,15 @@
                 <td>
                   <div class="tool-state">
                     <span class="inline-status" :class="isToolAllowed(tool.name) ? 'ok' : 'warn'">
-                      {{ isToolAllowed(tool.name) ? 'Allowed' : 'Denied' }}
+                      {{ isToolAllowed(tool.name) ? '允许' : '拒绝' }}
                     </span>
-                    <small>{{ tool.defaultEnabled ? 'Default on' : 'Default off' }}</small>
+                    <small>{{ tool.defaultEnabled ? '默认开启' : '默认关闭' }}</small>
                   </div>
                 </td>
                 <td>
                   <div class="contract-cell">
                     <strong>{{ tool.parameters.required.length }}</strong>
-                    <small>{{ tool.requiredCapabilities.length }} capabilities</small>
+                    <small>{{ tool.requiredCapabilities.length }} 项能力</small>
                   </div>
                 </td>
                 <td>
@@ -180,14 +179,14 @@
                       :disabled="!canEditTools || isToolAllowed(tool.name)"
                       @click.stop="allowTool(tool.name)"
                     >
-                      Allow
+                      允许
                     </button>
                     <button
                       type="button"
                       :disabled="!canEditTools || !isToolAllowed(tool.name)"
                       @click.stop="denyTool(tool.name)"
                     >
-                      Deny
+                      拒绝
                     </button>
                   </div>
                 </td>
@@ -200,34 +199,34 @@
       <aside class="panel detail-panel detail-rail">
         <div class="section-title">
           <div>
-            <h2>{{ selectedTool?.name ?? 'Tool detail rail' }}</h2>
-            <p>{{ selectedTool ? selectedDetailSummary : 'Select a registry row to inspect policy and invocation contract.' }}</p>
+            <h2>{{ selectedTool?.name ?? '工具详情' }}</h2>
+            <p>{{ selectedTool ? selectedDetailSummary : '请选择工具以检查策略和调用约束。' }}</p>
           </div>
         </div>
 
         <EmptyState
           v-if="!selectedTool"
-          title="No tool selected"
-          detail="Choose a tool from the registry board to inspect governance detail."
+          title="未选择工具"
+          detail="请从列表中选择工具以检查策略详情。"
         />
 
         <div v-else class="detail-stack">
           <article class="card detail-card">
             <div class="section-title compact">
               <div>
-                <h3>Policy posture</h3>
-                <p>Live allowance, default state, and review markers.</p>
+                <h3>策略状态</h3>
+                <p>当前允许状态、默认状态和审查标记。</p>
               </div>
             </div>
 
             <div class="chip-row detail-badges">
               <span class="inline-status" :class="isToolAllowed(selectedTool.name) ? 'ok' : 'warn'">
-                {{ isToolAllowed(selectedTool.name) ? 'Allowed' : 'Denied' }}
+                {{ isToolAllowed(selectedTool.name) ? '允许' : '拒绝' }}
               </span>
               <span class="inline-status" :class="selectedTool.defaultEnabled ? 'muted' : 'warn'">
-                {{ selectedTool.defaultEnabled ? 'Default on' : 'Default off' }}
+                {{ selectedTool.defaultEnabled ? '默认开启' : '默认关闭' }}
               </span>
-              <span v-if="selectedTool.auditLog" class="inline-status muted">Audited</span>
+              <span v-if="selectedTool.auditLog" class="inline-status muted">已审计</span>
               <span class="inline-status" :class="riskTone(selectedTool.riskLevel)">
                 {{ formatRiskLevel(selectedTool.riskLevel) }}
               </span>
@@ -235,15 +234,15 @@
 
             <div class="detail-list detail-list-tight">
               <div class="detail-item">
-                <span>Source</span>
+                <span>来源</span>
                 <strong>{{ formatSource(selectedTool.source) }}</strong>
               </div>
               <div v-if="selectedTool.owner" class="detail-item">
-                <span>Owner</span>
+                <span>所有者</span>
                 <strong>{{ selectedTool.owner }}</strong>
               </div>
               <div class="detail-item">
-                <span>Operational note</span>
+                <span>运行说明</span>
                 <strong>{{ toolOperationalNote(selectedTool) }}</strong>
               </div>
             </div>
@@ -255,14 +254,14 @@
                 :disabled="!canEditTools || isToolAllowed(selectedTool.name)"
                 @click="allowTool(selectedTool.name)"
               >
-                Allow
+                允许
               </button>
               <button
                 type="button"
                 :disabled="!canEditTools || !isToolAllowed(selectedTool.name)"
                 @click="denyTool(selectedTool.name)"
               >
-                Deny
+                拒绝
               </button>
             </div>
           </article>
@@ -270,39 +269,39 @@
           <article class="card detail-card">
             <div class="section-title compact">
               <div>
-                <h3>Invocation contract</h3>
-                <p>Required fields and capability gates for callers.</p>
+                <h3>调用约束</h3>
+                <p>调用方需要提供的字段和满足的能力条件。</p>
               </div>
             </div>
 
             <div class="grid detail-stat-grid">
               <article class="detail-stat">
-                <span>Required fields</span>
+                <span>必填字段</span>
                 <strong>{{ selectedTool.parameters.required.length }}</strong>
               </article>
               <article class="detail-stat">
-                <span>Schema props</span>
+                <span>结构属性</span>
                 <strong>{{ parameterCount(selectedTool) }}</strong>
               </article>
               <article class="detail-stat">
-                <span>Capabilities</span>
+                <span>能力条件</span>
                 <strong>{{ selectedTool.requiredCapabilities.length }}</strong>
               </article>
             </div>
 
             <div class="detail-item">
-              <span>Required parameters</span>
+              <span>必填参数</span>
               <div class="chip-row">
                 <span v-for="name in selectedTool.parameters.required" :key="name" class="chip">{{ name }}</span>
-                <span v-if="selectedTool.parameters.required.length === 0" class="muted">None</span>
+                <span v-if="selectedTool.parameters.required.length === 0" class="muted">无</span>
               </div>
             </div>
 
             <div class="detail-item">
-              <span>Capabilities</span>
+              <span>能力条件</span>
               <div class="chip-row">
                 <span v-for="name in selectedTool.requiredCapabilities" :key="name" class="chip">{{ name }}</span>
-                <span v-if="selectedTool.requiredCapabilities.length === 0" class="muted">None</span>
+                <span v-if="selectedTool.requiredCapabilities.length === 0" class="muted">无</span>
               </div>
             </div>
           </article>
@@ -351,7 +350,7 @@ const selectedTool = computed(
   () => filteredTools.value.find((tool) => tool.name === selectedToolName.value) ?? filteredTools.value[0] ?? null,
 );
 
-const canEditTools = computed(() => store.config !== null);
+const canEditTools = computed(() => false);
 const allowedCount = computed(() => store.tools.filter((tool) => isToolAllowed(tool.name)).length);
 const deniedCount = computed(() => store.tools.length - allowedCount.value);
 const highRiskCount = computed(() => store.tools.filter((tool) => tool.riskLevel === 'HIGH_RISK').length);
@@ -363,38 +362,38 @@ const highRiskAllowedCount = computed(
 
 const governanceSignals = computed(() => [
   {
-    label: 'Visible',
+    label: '可见',
     value: String(filteredTools.value.length),
-    detail: `${store.tools.length} tools cataloged in the full runtime inventory.`,
+    detail: `运行时中共登记 ${store.tools.length} 个工具。`,
     tone: 'muted',
   },
   {
-    label: 'Allowed',
+    label: '允许',
     value: String(allowedCount.value),
-    detail: `${deniedCount.value} lanes currently blocked by explicit policy.`,
+    detail: `${deniedCount.value} 个工具被策略明确阻止。`,
     tone: allowedCount.value > 0 ? 'ok' : 'warn',
   },
   {
-    label: 'Denied',
+    label: '拒绝',
     value: String(deniedCount.value),
-    detail: 'Default-off and manually denied lanes remain visible for audit.',
+    detail: '默认关闭和手动拒绝的工具仍会显示，便于审计。',
     tone: deniedCount.value > 0 ? 'warn' : 'muted',
   },
   {
-    label: 'High risk',
+    label: '高风险',
     value: String(highRiskCount.value),
-    detail: `${highRiskAllowedCount.value} high-risk lanes currently permitted.`,
+    detail: `当前允许 ${highRiskAllowedCount.value} 个高风险工具。`,
     tone: highRiskAllowedCount.value > 0 ? 'warn' : 'ok',
   },
 ]);
 
 const sourceCards = computed(() => [
   {
-    label: 'Built-in',
+    label: '内置',
     value: String(store.tools.filter((tool) => tool.source === 'BUILTIN').length),
   },
   {
-    label: 'Plugin',
+    label: '插件',
     value: String(store.tools.filter((tool) => tool.source === 'PLUGIN').length),
   },
   {
@@ -404,36 +403,30 @@ const sourceCards = computed(() => [
 ]);
 
 const policyPosture = computed(() => {
-  if (store.tools.length === 0) return 'Registry waiting for runtime sync';
-  if (highRiskAllowedCount.value > 0) return `${highRiskAllowedCount.value} high-risk lane(s) open`;
-  if (deniedCount.value > 0) return `${deniedCount.value} lane(s) under restriction`;
-  return 'Nominal governance posture';
+  if (store.tools.length === 0) return '等待运行时同步工具列表';
+  if (highRiskAllowedCount.value > 0) return `已开放 ${highRiskAllowedCount.value} 个高风险工具`;
+  if (deniedCount.value > 0) return `${deniedCount.value} 个工具受限`;
+  return '工具策略正常';
 });
 
 const registryStatus = computed(() => {
   if (filteredTools.value.length === 0) {
-    return { label: 'Filtered empty', tone: 'muted' };
+    return { label: '筛选结果为空', tone: 'muted' };
   }
   if (highRiskAllowedCount.value > 0) {
-    return { label: 'High-risk exposure present', tone: 'warn' };
+    return { label: '存在高风险开放项', tone: 'warn' };
   }
-  return { label: 'Policy sweep nominal', tone: 'ok' };
+  return { label: '策略检查正常', tone: 'ok' };
 });
 
 const selectedDetailSummary = computed(() => {
   if (!selectedTool.value) return '';
-  return `${formatSource(selectedTool.value.source)} lane with ${formatRiskLevel(selectedTool.value.riskLevel).toLowerCase()} posture and ${selectedTool.value.parameters.required.length} required field(s).`;
+  return `${formatSource(selectedTool.value.source)}工具，风险等级为${formatRiskLevel(selectedTool.value.riskLevel)}，包含 ${selectedTool.value.parameters.required.length} 个必填字段。`;
 });
 
 function isToolAllowed(name: string) {
-  const config = store.config?.agent;
-  if (!config) return false;
-  const enabledTools = config.enabledTools ?? [];
-  const disabledTools = config.disabledTools ?? [];
-  if (disabledTools.includes(name)) return false;
-  if (enabledTools.length > 0) return enabledTools.includes(name);
   const tool = store.tools.find((item) => item.name === name);
-  return tool ? tool.defaultEnabled && !disabledTools.includes(name) : false;
+  return tool?.effectiveEnabled ?? false;
 }
 
 async function allowTool(name: string) {
@@ -441,7 +434,7 @@ async function allowTool(name: string) {
   actionError.value = '';
   try {
     await store.updateToolAllowance(name, true);
-    actionNotice.value = `Allowed ${name}.`;
+    actionNotice.value = `已允许 ${name}。`;
   } catch (cause) {
     actionError.value = cause instanceof Error ? cause.message : String(cause);
   }
@@ -452,22 +445,29 @@ async function denyTool(name: string) {
   actionError.value = '';
   try {
     await store.updateToolAllowance(name, false);
-    actionNotice.value = `Denied ${name}.`;
+    actionNotice.value = `已拒绝 ${name}。`;
   } catch (cause) {
     actionError.value = cause instanceof Error ? cause.message : String(cause);
   }
 }
 
 function formatRiskLevel(level: ToolDto['riskLevel']) {
-  return level.replace(/_/g, ' ');
+  const labels: Record<ToolDto['riskLevel'], string> = {
+    SAFE_READ: '安全读取',
+    SESSION_ACTION: '会话操作',
+    EXTERNAL_READ: '外部读取',
+    STATE_WRITE: '状态写入',
+    HIGH_RISK: '高风险',
+  };
+  return labels[level];
 }
 
 function formatSource(source: ToolDto['source']) {
   switch (source) {
     case 'BUILTIN':
-      return 'Built-in';
+      return '内置';
     case 'PLUGIN':
-      return 'Plugin';
+      return '插件';
     case 'MCP':
       return 'MCP';
     default:
@@ -498,12 +498,12 @@ function parameterCount(tool: ToolDto) {
 function toolOperationalNote(tool: ToolDto) {
   if (tool.statusReason) return tool.statusReason;
   if (tool.requiredCapabilities.length > 0) {
-    return `Requires ${tool.requiredCapabilities.length} capability gate(s) before invocation.`;
+    return `调用前需要满足 ${tool.requiredCapabilities.length} 项能力条件。`;
   }
   if (tool.parameters.required.length > 0) {
-    return `${tool.parameters.required.length} field(s) are required for a valid call.`;
+    return `有效调用需要填写 ${tool.parameters.required.length} 个字段。`;
   }
-  return 'No extra gate beyond runtime policy and caller scope.';
+  return '除运行时策略和调用方范围外，没有额外限制。';
 }
 
 watch(filteredTools, (nextTools) => {

@@ -20,12 +20,20 @@ class CommandStage(
     override val order: StageOrder = StageOrder.COMMAND
 
     override suspend fun process(ctx: PipelineContext) = run {
-        val prefix = configProvider().prefix.trim()
+        val route = ctx.imRoute
+        if (ctx.effectiveRuntimeSnapshot?.application != null && route?.route?.action?.type != com.heyanle.priestess.bot.config.model.ImRouteActionType.COMMAND) return@run null
+        val prefix = (route?.route?.action?.commandPrefix ?: ctx.effectiveRuntimeSnapshot?.runtime?.command?.prefix ?: configProvider().prefix).trim()
         if (prefix.isEmpty()) return@run null
-        val text = ctx.textContent.trim()
-        if (!text.startsWith(prefix)) return@run null
+        val text = (route?.text ?: ctx.textContent).trim()
+        if (!text.startsWith(prefix)) {
+            if (route != null) ctx.directResponse = "内置指令需要以 $prefix 开头。"
+            return@run null
+        }
         val tokens = text.removePrefix(prefix).trim().split(Regex("\\s+")).filter(String::isNotBlank)
-        if (tokens.isEmpty()) return@run null
+        if (tokens.isEmpty()) {
+            if (route != null) ctx.directResponse = "请在 $prefix 后输入内置指令，例如 ${prefix}help。"
+            return@run null
+        }
         val command = commandCase.find(tokens.first())
         if (command == null) {
             ctx.directResponse = "未知指令：${tokens.first()}"
@@ -40,10 +48,9 @@ class CommandStage(
     }
 
     private fun messageContext(ctx: PipelineContext): PermissionMessageContext {
-        val snapshot = ctx.workspaceSnapshot
         return PermissionMessageContext(
-            workspaceId = snapshot?.id.orEmpty(),
-            agentName = snapshot?.agentConfigs?.firstOrNull()?.name.orEmpty(),
+            workspaceId = ctx.effectiveWorkspaceSnapshot?.config?.id.orEmpty(),
+            agentName = ctx.configurationTrace?.agentId.orEmpty(),
         )
     }
 }

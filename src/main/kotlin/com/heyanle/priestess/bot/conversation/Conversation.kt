@@ -9,4 +9,5 @@ data class Conversation(
     val sessionId: String,
     val createdAt: Long,
     val updatedAt: Long,
+    val agentId: String = "",
 )

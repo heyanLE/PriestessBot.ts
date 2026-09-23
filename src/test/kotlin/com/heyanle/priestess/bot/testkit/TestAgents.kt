@@ -15,6 +15,7 @@ fun testAgent(
     name = "test-agent",
     instructions = "You are a test agent.",
     model = "fake-model",
+    providerName = "fake-provider",
     maxSteps = maxSteps,
     toolTimeoutMs = toolTimeoutMs,
 )

@@ -1,10 +1,12 @@
 package com.heyanle.priestess.bot
 
-import com.heyanle.priestess.bot.config.ConfigCase
+import com.heyanle.priestess.bot.config.runtime.ConfigurationRuntimeService
+import com.heyanle.priestess.bot.config.runtime.EffectiveConfigStore
 import com.heyanle.priestess.bot.core.db.DatabaseCase
 import com.heyanle.priestess.bot.observability.ObservabilityCase
 import com.heyanle.priestess.bot.pipeline.PipelineCase
 import com.heyanle.priestess.bot.platform.PlatformCase
+import com.heyanle.priestess.bot.platform.adapters.weixin.WeixinQrLoginService
 import com.heyanle.priestess.bot.plugin.PluginCase
 import com.heyanle.priestess.bot.provider.ProviderCase
 import com.heyanle.priestess.bot.server.ServerCase
@@ -34,15 +36,32 @@ class PriestessRuntime private constructor(
         workspaceCase: WorkspaceCase,
         observabilityCase: ObservabilityCase,
         databaseCase: DatabaseCase,
-        configCase: ConfigCase,
         overflowStore: ToolResultOverflowStore,
         pipelineDrainTimeoutMillis: Long = PipelineCase.DEFAULT_DRAIN_TIMEOUT_MILLIS,
+        configurationRuntimeService: ConfigurationRuntimeService? = null,
+        effectiveConfigStore: EffectiveConfigStore? = null,
+        weixinQrLoginService: WeixinQrLoginService? = null,
+        platformResourceDatabase: DatabaseCase? = null,
     ) : this(
         startAction = {
+            configurationRuntimeService?.startup()?.let { result ->
+                check(result.success) {
+                    "Configuration activation failed: " + result.diagnostics.joinToString { "${it.code}: ${it.message}" }
+                }
+                val snapshot = effectiveConfigStore?.current()
+                KotlinLogging.logger("ConfigurationRuntime").info {
+                    "Activated configuration path=${configurationRuntimeService.sourcePath()}, " +
+                        "revision=${result.desiredRevision}, version=${result.activeVersion}, " +
+                        "workspaces=${snapshot?.workspaces?.entries?.sortedBy { it.key }?.joinToString(",") { (id, ws) -> "$id:${ws.version.value}" }.orEmpty()}, " +
+                        "diagnostics=${result.diagnostics.size}, pendingRestart=${result.pendingRestartPaths.size}"
+                }
+            }
+            configurationRuntimeService?.startConfiguredWatcher()
             platformCase.start()
             serverCase.start()
         },
         stopSteps = listOf(
+            StopStep("weixin QR login") { weixinQrLoginService?.stop() },
             StopStep("platforms") { platformCase.stop() },
             StopStep("pipeline") {
                 pipelineCase.drain(pipelineDrainTimeoutMillis)
@@ -57,7 +76,9 @@ class PriestessRuntime private constructor(
             StopStep("workspace") { workspaceCase.stop() },
             StopStep("observability") { observabilityCase.stop() },
             StopStep("database") { databaseCase.stop() },
-            StopStep("config") { configCase.stop() },
+            StopStep("platform resource database") { platformResourceDatabase?.stop() },
+            StopStep("configuration runtime") { configurationRuntimeService?.stop() },
+            StopStep("effective config") { effectiveConfigStore?.close() },
         ),
     )
 

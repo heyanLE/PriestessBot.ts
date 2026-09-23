@@ -54,6 +54,8 @@ class BuiltinToolsRegistrationTest {
         )
 
         assertTrue(tools.keys.containsAll(expected))
+        assertNull(tools["early_reply"])
+        assertNull(tools["send_message"])
         expected.forEach { toolName ->
             assertNull(tools.getValue(toolName).metadata.statusReason, "$toolName should be available")
         }

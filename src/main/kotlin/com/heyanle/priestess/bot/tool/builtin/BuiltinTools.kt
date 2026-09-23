@@ -62,8 +62,6 @@ fun registerBuiltinTools(
     register(TerminalTool())
     register(ProcessTool())
     register(ReadTerminalTool())
-    register(EarlyReplyTool())
-    register(SendMessageTool())
     register(
         KnowledgeSearchTool(knowledgeCaseProvider),
         statusReason = if (knowledgeCaseProvider == null) "Requires knowledge dependency" else null,

@@ -4,8 +4,8 @@
       <div class="conversation-hero-grid">
         <div class="conversation-copy">
           <div class="conversation-band">
-            <span>Troubleshooting</span>
-            <span>{{ conversation?.platform ?? 'Conversation Detail' }}</span>
+            <span>问题排查</span>
+            <span>{{ conversation?.platform ?? '会话详情' }}</span>
           </div>
 
           <h2>{{ conversation?.sessionId ?? conversationId }}</h2>
@@ -24,23 +24,23 @@
           <article class="card conversation-rail-card">
             <div class="section-title compact">
               <div>
-                <h3>What matters here</h3>
-                <p>Read the thread as a transcript with evidence, not a raw message dump.</p>
+                <h3>检查重点</h3>
+                <p>把会话作为带有上下文证据的记录阅读，而不是简单浏览原始消息。</p>
               </div>
             </div>
 
             <div class="rail-list">
               <div class="rail-item">
-                <span>Platform</span>
-                <strong>{{ conversation?.platform ?? 'Unknown' }}</strong>
+                <span>平台</span>
+                <strong>{{ conversation?.platform ?? '未知' }}</strong>
               </div>
               <div class="rail-item">
-                <span>Updated</span>
-                <strong>{{ conversation ? formatTime(conversation.updatedAt) : 'Awaiting metadata' }}</strong>
+                <span>更新时间</span>
+                <strong>{{ conversation ? formatTime(conversation.updatedAt) : '等待元数据' }}</strong>
               </div>
               <div class="rail-item">
-                <span>Transcript state</span>
-                <strong>{{ loading ? 'Refreshing' : messages.length > 0 ? 'Loaded' : 'Empty' }}</strong>
+                <span>消息记录状态</span>
+                <strong>{{ loading ? '刷新中' : messages.length > 0 ? '已加载' : '为空' }}</strong>
               </div>
             </div>
           </article>
@@ -52,21 +52,21 @@
       <section class="panel transcript-panel">
         <div class="section-title">
           <div>
-            <h2>Session transcript</h2>
+            <h2>会话消息记录</h2>
             <p>{{ transcriptSummary }}</p>
           </div>
           <div class="toolbar">
-            <RouterLink class="button-link" to="/conversations">Back</RouterLink>
-            <button type="button" class="primary" @click="loadMessages()">Refresh</button>
+            <RouterLink class="button-link" to="/conversations">返回</RouterLink>
+            <button type="button" class="primary" @click="loadMessages()">刷新</button>
           </div>
         </div>
 
-        <p v-if="loading" class="notice">Refreshing transcript from the dashboard API.</p>
+        <p v-if="loading" class="notice">正在通过 Dashboard API 刷新消息记录。</p>
 
         <EmptyState
           v-if="messages.length === 0 && !loading"
-          title="No messages"
-          detail="This conversation has no stored messages yet."
+          title="暂无消息"
+          detail="该会话目前没有已存储的消息。"
         />
 
         <section v-else class="transcript-ledger">
@@ -80,10 +80,10 @@
             </div>
 
             <p v-if="message.content">{{ message.content }}</p>
-            <p v-else class="muted">No text content</p>
+            <p v-else class="muted">无文本内容</p>
 
             <div v-if="message.toolCallId" class="tool-call-pill">
-              <span>Tool call id</span>
+              <span>工具调用 ID</span>
               <code>{{ message.toolCallId }}</code>
             </div>
 
@@ -95,8 +95,8 @@
       <aside class="panel detail-panel detail-rail">
         <div class="section-title">
           <div>
-            <h2>Session detail</h2>
-            <p>Operator, assistant, and tool posture across the current transcript.</p>
+            <h2>会话详情</h2>
+            <p>当前消息记录中的用户、智能体和工具统计。</p>
           </div>
         </div>
 
@@ -104,31 +104,31 @@
           <article class="card detail-card">
             <div class="grid detail-stat-grid">
               <article class="detail-stat">
-                <span>Messages</span>
+                <span>消息</span>
                 <strong>{{ messages.length }}</strong>
               </article>
               <article class="detail-stat">
-                <span>Operator</span>
+                <span>用户</span>
                 <strong>{{ roleCounts.user }}</strong>
               </article>
               <article class="detail-stat">
-                <span>Assistant</span>
+                <span>智能体</span>
                 <strong>{{ roleCounts.assistant }}</strong>
               </article>
             </div>
 
             <div class="detail-list">
               <div class="detail-item">
-                <span>Tool rows</span>
+                <span>工具记录</span>
                 <strong>{{ roleCounts.tool }}</strong>
               </div>
               <div class="detail-item">
-                <span>First message</span>
-                <strong>{{ firstMessage ? formatTime(firstMessage.createdAt) : 'None' }}</strong>
+                <span>首条消息</span>
+                <strong>{{ firstMessage ? formatTime(firstMessage.createdAt) : '无' }}</strong>
               </div>
               <div class="detail-item">
-                <span>Latest message</span>
-                <strong>{{ latestMessage ? formatTime(latestMessage.createdAt) : 'None' }}</strong>
+                <span>最新消息</span>
+                <strong>{{ latestMessage ? formatTime(latestMessage.createdAt) : '无' }}</strong>
               </div>
             </div>
           </article>
@@ -136,27 +136,27 @@
           <article class="card detail-card">
             <div class="section-title compact">
               <div>
-                <h3>Conversation identity</h3>
-                <p>Stable thread metadata for cross-checking runtime sessions.</p>
+                <h3>会话标识</h3>
+                <p>用于核对运行时会话的稳定元数据。</p>
               </div>
             </div>
 
             <div class="detail-list">
               <div class="detail-item">
-                <span>Conversation id</span>
+                <span>会话 ID</span>
                 <strong>{{ conversationId }}</strong>
               </div>
               <div class="detail-item">
-                <span>Platform</span>
-                <strong>{{ conversation?.platform ?? 'Unknown' }}</strong>
+                <span>平台</span>
+                <strong>{{ conversation?.platform ?? '未知' }}</strong>
               </div>
               <div class="detail-item">
-                <span>Session id</span>
-                <strong>{{ conversation?.sessionId ?? 'Unknown' }}</strong>
+                <span>会话 ID</span>
+                <strong>{{ conversation?.sessionId ?? '未知' }}</strong>
               </div>
               <div class="detail-item">
-                <span>Updated</span>
-                <strong>{{ conversation ? formatTime(conversation.updatedAt) : 'Unknown' }}</strong>
+                <span>更新时间</span>
+                <strong>{{ conversation ? formatTime(conversation.updatedAt) : '未知' }}</strong>
               </div>
             </div>
           </article>
@@ -190,38 +190,38 @@ const roleCounts = computed(() => ({
 }));
 
 const conversationSummary = computed(() => {
-  if (!conversation.value) return `Inspect stored messages for session ${conversationId.value}.`;
-  return `${conversation.value.platform} session ${conversation.value.sessionId} updated ${formatTime(conversation.value.updatedAt)} with ${messages.value.length} stored message(s).`;
+  if (!conversation.value) return `检查会话 ${conversationId.value} 的已存储消息。`;
+  return `${conversation.value.platform} 平台会话 ${conversation.value.sessionId} 更新于 ${formatTime(conversation.value.updatedAt)}，共 ${messages.value.length} 条消息。`;
 });
 
 const transcriptSummary = computed(() => {
-  if (messages.value.length === 0) return 'The session ledger is empty until stored messages arrive.';
-  return `${roleCounts.value.user} operator, ${roleCounts.value.assistant} assistant, and ${roleCounts.value.tool} tool row(s) in the current transcript.`;
+  if (messages.value.length === 0) return '尚未收到已存储消息。';
+  return `当前记录包含 ${roleCounts.value.user} 条用户消息、${roleCounts.value.assistant} 条智能体消息和 ${roleCounts.value.tool} 条工具记录。`;
 });
 
 const conversationSignals = computed(() => [
   {
-    label: 'Messages',
+    label: '消息',
     value: String(messages.value.length),
-    detail: 'Stored transcript rows currently loaded for this session.',
+    detail: '当前会话已加载的消息记录数量。',
     tone: messages.value.length > 0 ? 'ok' : 'muted',
   },
   {
-    label: 'Operator turns',
+    label: '用户消息',
     value: String(roleCounts.value.user),
-    detail: 'User-originated messages in the visible transcript.',
+    detail: '可见记录中由用户发起的消息。',
     tone: roleCounts.value.user > 0 ? 'ok' : 'muted',
   },
   {
-    label: 'Tool traces',
+    label: '工具轨迹',
     value: String(roleCounts.value.tool),
-    detail: roleCounts.value.tool > 0 ? 'Tool activity is embedded in the session record.' : 'No tool calls surfaced in stored rows.',
+    detail: roleCounts.value.tool > 0 ? '会话记录中包含工具活动。' : '已存储记录中没有工具调用。',
     tone: roleCounts.value.tool > 0 ? 'warn' : 'muted',
   },
   {
-    label: 'Latest update',
-    value: conversation.value ? formatTime(conversation.value.updatedAt) : 'Unknown',
-    detail: conversation.value ? 'Conversation metadata from the current runtime feed.' : 'Conversation metadata is still loading from the dashboard store.',
+    label: '最近更新',
+    value: conversation.value ? formatTime(conversation.value.updatedAt) : '未知',
+    detail: conversation.value ? '来自当前运行时的会话元数据。' : '正在从控制台加载会话元数据。',
     tone: conversation.value ? 'ok' : 'muted',
   },
 ]);
@@ -251,9 +251,9 @@ function normalizeRole(role: string) {
 
 function formatRole(role: string) {
   const normalized = normalizeRole(role);
-  if (normalized === 'assistant') return 'Assistant';
-  if (normalized === 'user') return 'Operator';
-  if (normalized === 'tool') return 'Tool';
+  if (normalized === 'assistant') return '智能体';
+  if (normalized === 'user') return '用户';
+  if (normalized === 'tool') return '工具';
   return role;
 }
 
@@ -265,7 +265,7 @@ function roleTone(role: string) {
 }
 
 function formatTime(value: number) {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat('zh-CN', {
     month: 'short',
     day: '2-digit',
     hour: '2-digit',

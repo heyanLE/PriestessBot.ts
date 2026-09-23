@@ -4,14 +4,13 @@
       <div class="knowledge-hero-grid">
         <div class="knowledge-copy">
           <div class="knowledge-band">
-            <span>Assets</span>
-            <span>Knowledge</span>
+            <span>资源</span>
+            <span>知识库</span>
           </div>
 
-          <h2>Knowledge base registry</h2>
+          <h2>知识库列表</h2>
           <p>
-            Curate retrieval sources, inject fresh documents, and test ranking behavior before
-            memories or agent calls depend on these materials.
+            管理检索来源、导入新文档，并在记忆或智能体使用前测试排序效果。
           </p>
 
           <div class="grid knowledge-signal-grid">
@@ -27,23 +26,23 @@
           <article class="card knowledge-rail-card">
             <div class="section-title compact">
               <div>
-                <h3>What matters here</h3>
-                <p>Keep sources few, readable, and easy to validate before they enter runtime use.</p>
+                <h3>检查重点</h3>
+                <p>保持来源精简、易读且便于验证，再投入运行使用。</p>
               </div>
             </div>
 
             <div class="rail-list">
               <div class="rail-item">
-                <span>Selected base</span>
-                <strong>{{ selectedBase?.name ?? 'None selected' }}</strong>
+                <span>已选知识库</span>
+                <strong>{{ selectedBase?.name ?? '未选择' }}</strong>
               </div>
               <div class="rail-item">
-                <span>Latest ingest</span>
-                <strong>{{ lastChunkCount !== null ? `${lastChunkCount} chunk(s)` : 'No recent ingest' }}</strong>
+                <span>最近导入</span>
+                <strong>{{ lastChunkCount !== null ? `${lastChunkCount} 个分块` : '暂无导入' }}</strong>
               </div>
               <div class="rail-item">
-                <span>Search posture</span>
-                <strong>{{ results.length > 0 ? `${results.length} ranked result(s)` : 'Awaiting a test query' }}</strong>
+                <span>搜索状态</span>
+                <strong>{{ results.length > 0 ? `${results.length} 条排序结果` : '等待测试查询' }}</strong>
               </div>
             </div>
           </article>
@@ -55,22 +54,22 @@
       <section class="panel registry-panel">
         <div class="section-title">
           <div>
-            <h2>Knowledge bases</h2>
-            <p>{{ bases.length }} base(s) available to `knowledge_search`.</p>
+            <h2>知识库</h2>
+            <p>`knowledge_search` 当前可使用 {{ bases.length }} 个知识库。</p>
           </div>
-          <button type="button" class="primary" @click="loadBases">Refresh</button>
+          <button type="button" class="primary" @click="loadBases">刷新</button>
         </div>
 
         <form class="stacked-form" @submit.prevent="createBase">
-          <input v-model="newBaseName" type="text" placeholder="Base name" />
-          <input v-model="newBaseDescription" type="text" placeholder="Description" />
-          <button type="submit" class="primary" :disabled="newBaseName.trim().length === 0">Create</button>
+          <input v-model="newBaseName" type="text" placeholder="知识库名称" />
+          <input v-model="newBaseDescription" type="text" placeholder="描述" />
+          <button type="submit" class="primary" :disabled="newBaseName.trim().length === 0">创建</button>
         </form>
 
         <EmptyState
           v-if="bases.length === 0"
-          title="No knowledge bases"
-          detail="Create a base, then add text documents for retrieval."
+          title="暂无知识库"
+          detail="请先创建知识库，再添加用于检索的文本文档。"
         />
 
         <div v-else class="grid list-grid">
@@ -82,8 +81,8 @@
             @click="selectedBaseId = base.id"
           >
             <h3>{{ base.name }}</h3>
-            <p>{{ base.description || 'No description' }}</p>
-            <span class="inline-status muted">Updated {{ formatTime(base.updatedAt) }}</span>
+            <p>{{ base.description || '无描述' }}</p>
+            <span class="inline-status muted">更新于 {{ formatTime(base.updatedAt) }}</span>
           </article>
         </div>
       </section>
@@ -91,18 +90,18 @@
       <aside class="panel detail-panel knowledge-detail-rail">
         <div class="section-title">
           <div>
-            <h2>Add document</h2>
-            <p v-if="selectedBase">Target base: {{ selectedBase.name }}</p>
-            <p v-else>Select or create a base first.</p>
+            <h2>添加文档</h2>
+            <p v-if="selectedBase">目标知识库：{{ selectedBase.name }}</p>
+            <p v-else>请先选择或创建知识库。</p>
           </div>
         </div>
 
         <form class="grid" @submit.prevent="addDocument">
-          <input v-model="documentName" type="text" placeholder="Document name" />
+          <input v-model="documentName" type="text" placeholder="文档名称" />
           <textarea
             v-model="documentContent"
             class="document-editor"
-            placeholder="Paste Markdown, notes, or plain text..."
+            placeholder="粘贴 Markdown、笔记或纯文本…"
             spellcheck="false"
           ></textarea>
           <button
@@ -110,12 +109,12 @@
             class="primary"
             :disabled="!selectedBaseId || documentName.trim().length === 0 || documentContent.trim().length === 0"
           >
-            Add Document
+            添加文档
           </button>
         </form>
 
         <section v-if="lastChunkCount !== null" class="notice ok">
-          Stored {{ lastChunkCount }} chunk(s).
+          已存储 {{ lastChunkCount }} 个分块。
         </section>
       </aside>
     </div>
@@ -123,20 +122,20 @@
     <section class="panel search-panel">
       <div class="section-title">
         <div>
-          <h2>Search test</h2>
-          <p>Runs the same retrieval path used by the agent runtime.</p>
+          <h2>搜索测试</h2>
+          <p>使用与智能体运行时相同的检索链路。</p>
         </div>
       </div>
 
       <form class="chat-form" @submit.prevent="search">
-        <input v-model="query" type="text" placeholder="Search knowledge..." />
-        <button type="submit" class="primary" :disabled="query.trim().length === 0">Search</button>
+        <input v-model="query" type="text" placeholder="搜索知识库…" />
+        <button type="submit" class="primary" :disabled="query.trim().length === 0">搜索</button>
       </form>
 
       <EmptyState
         v-if="results.length === 0"
-        title="No results loaded"
-        detail="Submit a query to inspect ranked chunks."
+        title="暂无搜索结果"
+        detail="提交查询以检查分块排序结果。"
       />
 
       <div v-else class="grid knowledge-result-grid">
@@ -146,7 +145,7 @@
               <h3>{{ result.chunk.documentName }}</h3>
               <p>{{ result.chunk.id }}</p>
             </div>
-            <span class="status-pill ok">score {{ result.score.toFixed(2) }}</span>
+            <span class="status-pill ok">得分 {{ result.score.toFixed(2) }}</span>
           </div>
           <p>{{ result.chunk.content }}</p>
         </article>
@@ -174,27 +173,27 @@ const selectedBase = computed(() => bases.value.find((base) => base.id === selec
 
 const knowledgeSignals = computed(() => [
   {
-    label: 'Bases',
+    label: '知识库',
     value: String(bases.value.length),
-    detail: 'Registered retrieval sources in the current knowledge registry.',
+    detail: '当前知识配置列表中已注册的检索来源。',
     tone: bases.value.length > 0 ? 'ok' : 'muted',
   },
   {
-    label: 'Selected',
-    value: selectedBase.value?.name ?? 'None',
-    detail: selectedBase.value ? 'Current ingest target and preferred search scope.' : 'Choose a base to constrain ingestion and testing.',
+    label: '已选择',
+    value: selectedBase.value?.name ?? '无',
+    detail: selectedBase.value ? '当前文档导入目标和首选搜索范围。' : '请选择知识库以限定导入和测试范围。',
     tone: selectedBase.value ? 'muted' : 'muted',
   },
   {
-    label: 'Last ingest',
+    label: '最近导入',
     value: lastChunkCount.value !== null ? String(lastChunkCount.value) : '0',
-    detail: lastChunkCount.value !== null ? 'Chunks produced by the latest document import.' : 'No recent document ingest has been performed.',
+    detail: lastChunkCount.value !== null ? '最近一次文档导入生成的分块数。' : '尚未执行文档导入。',
     tone: lastChunkCount.value !== null ? 'ok' : 'muted',
   },
   {
-    label: 'Results',
+    label: '结果',
     value: String(results.value.length),
-    detail: results.value.length > 0 ? 'Retrieval ranking results are available for review.' : 'Run a query to inspect retrieval quality.',
+    detail: results.value.length > 0 ? '可查看检索排序结果。' : '运行查询以检查检索质量。',
     tone: results.value.length > 0 ? 'warn' : 'muted',
   },
 ]);
@@ -238,7 +237,7 @@ async function search() {
 }
 
 function formatTime(value: number) {
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(value);
+  return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(value);
 }
 
 onMounted(() => void loadBases());

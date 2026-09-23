@@ -49,8 +49,8 @@ class WorkspaceSkillToolsTest {
             mapOf(
                 "action" to "patch",
                 "name" to "research",
-                "old_string" to "Research",
-                "new_string" to "Deep Research",
+                "old_string" to "# Research",
+                "new_string" to "# Deep Research",
             ),
         )
         assertTrue(patched.success)

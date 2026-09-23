@@ -1,6 +1,5 @@
 package com.heyanle.priestess.bot.server
 
-import com.heyanle.priestess.bot.config.PriestessConfig
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.defaultForFilePath
@@ -11,6 +10,8 @@ import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
+import io.ktor.server.response.header
+import io.ktor.http.HttpHeaders
 import io.ktor.server.routing.get
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.post
@@ -22,9 +23,11 @@ import io.ktor.websocket.Frame
 import kotlinx.coroutines.flow.produceIn
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import com.heyanle.priestess.bot.observability.trace.traceRoutes
 
 fun Application.dashboardRoutes(service: DashboardService) {
     val json = Json { encodeDefaults = true }
+    service.executionTraces?.let { traceRoutes(it) }
 
     routing {
         get("/health") {
@@ -35,49 +38,72 @@ fun Application.dashboardRoutes(service: DashboardService) {
         }
 
         route("/api") {
-            get("/config") {
-                call.respond(service.config())
-            }
-            put("/config") {
-                call.respond(service.replaceConfig(call.receive<PriestessConfig>()))
-            }
-            post("/config/reload") {
-                call.respond(service.reloadConfig())
-            }
-            get("/config/backups") {
-                call.respond(service.configBackups())
-            }
-            post("/config/backups/{id}/restore") {
-                val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
-                call.respond(service.restoreConfigBackup(id))
-            }
-
-            get("/config/layers/database") {
-                call.respond(service.databaseConfigLayer())
-            }
-            get("/config/layers/environment") {
-                call.respond(service.environmentOverrideSummary())
-            }
+            service.applicationManagement?.let { applicationManagementRoutes(it) }
+            service.agentSkillCatalog?.let { agentSkillRoutes(it) }
             get("/config/workdir") {
                 call.respond(service.workingDirectorySummary())
             }
-            put("/config/workdir") {
-                call.respond(service.updateWorkingDirectory(call.receive<WorkingDirectoryUpdateRequest>()))
+
+            get("/config/v2/raw") {
+                call.respond(service.rawV2Configuration())
             }
-            post("/config/preview") {
-                call.respond(service.effectiveRuntimePreview(call.receive<EffectiveRuntimePreviewRequest>()))
+            get("/config/v2/workspaces/{id}/raw") {
+                val id = call.parameters["id"] ?: return@get call.respond(HttpStatusCode.BadRequest)
+                call.respond(service.rawV2Workspace(id))
+            }
+            get("/config/v2/effective") {
+                val effective = service.effectiveV2Configuration()
+                    ?: return@get call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "No effective configuration is active"))
+                call.respond(effective)
+            }
+            post("/config/v2/preview") {
+                call.respond(service.previewV2Configuration(call.receive<ConfigurationContentRequest>()))
+            }
+            post("/config/v2/workspaces/{id}/preview") {
+                val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+                call.respond(service.previewV2Workspace(id, call.receive<ConfigurationContentRequest>()))
+            }
+            put("/config/v2") {
+                val result = service.applyV2Configuration(call.receive<ConfigurationApplyRequest>())
+                call.respond(if (result.success) HttpStatusCode.OK else HttpStatusCode.Conflict, result)
+            }
+            put("/config/v2/workspaces/{id}") {
+                val id = call.parameters["id"] ?: return@put call.respond(HttpStatusCode.BadRequest)
+                val result = service.applyV2Workspace(id, call.receive<ConfigurationApplyRequest>())
+                call.respond(if (result.success) HttpStatusCode.OK else HttpStatusCode.Conflict, result)
+            }
+            post("/config/v2/reload") {
+                val result = service.reloadV2Configuration()
+                call.respond(if (result.success) HttpStatusCode.OK else HttpStatusCode.UnprocessableEntity, result)
+            }
+            get("/config/v2/backups") {
+                call.respond(service.configBackups())
+            }
+            post("/config/v2/backups/{id}/restore") {
+                val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+                val result = service.restoreConfigBackup(id)
+                call.respond(if (result.success) HttpStatusCode.OK else HttpStatusCode.UnprocessableEntity, result)
             }
 
             get("/platforms") {
                 call.respond(service.platforms())
             }
-            post("/platforms/{name}/start") {
+            post("/platforms/{name}/weixin/qr") {
                 val name = call.parameters["name"] ?: return@post call.respond(HttpStatusCode.BadRequest)
-                call.respond(service.setPlatformEnabled(name, true))
+                call.response.header(HttpHeaders.CacheControl, "no-store")
+                call.respond(HttpStatusCode.Created, service.startWeixinQrLogin(name))
             }
-            post("/platforms/{name}/stop") {
+            get("/platforms/{name}/weixin/qr/{sessionId}") {
+                val name = call.parameters["name"] ?: return@get call.respond(HttpStatusCode.BadRequest)
+                val sessionId = call.parameters["sessionId"] ?: return@get call.respond(HttpStatusCode.BadRequest)
+                call.response.header(HttpHeaders.CacheControl, "no-store")
+                call.respond(service.weixinQrLoginStatus(name, sessionId))
+            }
+            post("/platforms/{name}/weixin/qr/{sessionId}/cancel") {
                 val name = call.parameters["name"] ?: return@post call.respond(HttpStatusCode.BadRequest)
-                call.respond(service.setPlatformEnabled(name, false))
+                val sessionId = call.parameters["sessionId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+                call.response.header(HttpHeaders.CacheControl, "no-store")
+                call.respond(service.cancelWeixinQrLogin(name, sessionId))
             }
 
             get("/providers") {
@@ -180,12 +206,6 @@ fun Application.dashboardRoutes(service: DashboardService) {
                 call.respond(service.expireMemory())
             }
 
-            get("/sub-agents/config") {
-                call.respond(service.subAgentConfig())
-            }
-            put("/sub-agents/config") {
-                call.respond(service.replaceSubAgentConfig(call.receive()))
-            }
             post("/sub-agents/test") {
                 call.respond(service.testSubAgent(call.receive<SubAgentTestRequest>()))
             }

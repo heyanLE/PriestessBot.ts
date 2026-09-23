@@ -2,14 +2,25 @@ package com.heyanle.priestess.bot.agent.runner
 
 import com.heyanle.priestess.bot.agent.*
 import com.heyanle.priestess.bot.agent.context.ContextManager
+import com.heyanle.priestess.bot.agent.context.ContextSummarizer
+import com.heyanle.priestess.bot.agent.preset.AgentPresetRegistry
+import com.heyanle.priestess.bot.agent.prompt.AgentDirectoryInstructionsRenderer
+import com.heyanle.priestess.bot.agent.prompt.SystemPromptAssembler
 import com.heyanle.priestess.bot.provider.ChatProvider
 import com.heyanle.priestess.bot.provider.model.ConversationMessage
 import com.heyanle.priestess.bot.provider.model.LLMRequest
 import com.heyanle.priestess.bot.tool.AgentToolContext
 import com.heyanle.priestess.bot.tool.FunctionTool
 import com.heyanle.priestess.bot.tool.ToolCase
+import com.heyanle.priestess.bot.tool.ToolResultMaterialization
+import com.heyanle.priestess.bot.tool.ToolResultMaterializationConfig
+import com.heyanle.priestess.bot.tool.ToolResultMaterializer
 import com.heyanle.priestess.bot.tool.ToolResultOverflowStore
 import com.heyanle.priestess.bot.pipeline.PermissionGroup
+import com.heyanle.priestess.bot.observability.trace.TraceCategory
+import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -23,18 +34,41 @@ import kotlinx.coroutines.sync.withLock
  * 4. 无 ToolCall → Final 回答
  * 5. 超 maxSteps → Error
  */
-class ReActRunner(
+open class ReActRunner(
     private val context: AgentContext,
     private val provider: ChatProvider,
     private val toolCase: ToolCase,
     private val contextManager: ContextManager,
     private val overflowStore: ToolResultOverflowStore = ToolResultOverflowStore(),
+    private val resultMaterializer: ToolResultMaterializer = ToolResultMaterializer(overflowStore),
     private val hooks: AgentHooks? = null,
+    /** How one step's tool calls are dispatched. Appended last so existing callers are unaffected. */
+    private val toolScheduler: ToolCallScheduler = SerialToolCallScheduler(),
 ) : AgentRunner {
+
+    private val toolCallExecutor = ToolCallExecutor(toolCase, resultMaterializer)
+
+    /**
+     * Summarization runs on this runner's own provider. It is called directly rather than through
+     * [requestModel] so a compaction summary is not recorded as another step request in the trace.
+     */
+    private val summarizer = ContextSummarizer { messages, maxTokens ->
+        provider.textChat(
+            LLMRequest(
+                model = context.agent.model,
+                messages = messages,
+                tools = emptyList(),
+                temperature = 0.0,
+                maxTokens = maxTokens,
+            ),
+        ).content
+    }
 
     private val mutex = Mutex()
 
-    override var state: AgentState = AgentState.IDLE
+    // `final` keeps the interface override non-overridable, which is what allows the private setter on
+    // an open class. Subclasses change scheduling, never the state machine.
+    final override var state: AgentState = AgentState.IDLE
         private set
 
     private var currentStep: Int = 0
@@ -64,6 +98,7 @@ class ReActRunner(
         currentStep = 0
         finalResponseCache = null
         systemMessage = null
+        context.responseIntent.clear()
     }
 
     override suspend fun step(): AgentResponse = mutex.withLock {
@@ -113,31 +148,42 @@ class ReActRunner(
             state = AgentState.RUNNING
         }
 
+        val stepStarted = System.nanoTime()
+        context.executionTrace?.record(TraceCategory.AGENT, "step.started", step = currentStep + 1)
         return try {
             refreshSystemMessage()
             val compressed = contextManager.compress(
                 agent = context.agent,
                 messages = context.messages,
                 systemMessage = systemMessage,
+                summarizer = summarizer,
             )
 
             val tools = workspaceScopedTools().map { tool ->
-                tool.schema.toOpenAIFormat(toolDescription(tool))
+                tool.schema.toOpenAIFormat()
             }
             val request = LLMRequest(
                 model = context.agent.model,
                 messages = compressed.toList(),
                 tools = tools,
+                temperature = context.agent.temperature,
+                maxTokens = context.agent.maxOutputTokens,
             )
 
-            val response = provider.textChat(request)
+            val response = requestModel(request)
 
             if (response.hasToolCalls()) {
                 handleToolCalls(response)
             } else {
                 handleFinalResponse(response)
             }
+        } catch (e: CancellationException) {
+            context.executionTrace?.record(TraceCategory.AGENT, "step.cancelled", step = currentStep + 1)
+            throw e
         } catch (e: Exception) {
+            context.executionTrace?.record(TraceCategory.AGENT, "step.error", buildJsonObject {
+                put("error", e.message ?: e::class.simpleName)
+            }, step = currentStep + 1)
             val error = AgentResponse.Error(
                 message = e.message ?: "Unknown error during agent step",
                 cause = e,
@@ -145,6 +191,25 @@ class ReActRunner(
             state = AgentState.ERROR
             hooks?.onAgentError(context, error)
             error
+        } finally {
+            context.executionTrace?.record(TraceCategory.AGENT, "step.finished", buildJsonObject {
+                put("state", state.name)
+            }, step = currentStep + 1, durationMillis = (System.nanoTime() - stepStarted) / 1_000_000)
+        }
+    }
+
+    private suspend fun requestModel(request: LLMRequest): com.heyanle.priestess.bot.provider.model.LLMResponse {
+        val started = System.nanoTime()
+        context.executionTrace?.llmRequest(currentStep + 1, request)
+        return try {
+            provider.textChat(request).also {
+                context.executionTrace?.llmResponse(currentStep + 1, it, (System.nanoTime() - started) / 1_000_000)
+            }
+        } catch (e: Exception) {
+            context.executionTrace?.record(TraceCategory.LLM, if (e is CancellationException) "llm.cancelled" else "llm.error", buildJsonObject {
+                put("error", e.message ?: e::class.simpleName)
+            }, step = currentStep + 1, durationMillis = (System.nanoTime() - started) / 1_000_000)
+            throw e
         }
     }
 
@@ -163,46 +228,16 @@ class ReActRunner(
         )
         context.messages.add(assistantMsg)
 
-        val toolInputs = toolCalls.map { tc ->
-            Triple(tc.id, tc.name, tc.arguments)
-        }
-
-        for (tc in toolCalls) {
-            hooks?.onToolStart(context, tc.name, tc.arguments)
-        }
-
         val toolContext = buildToolContext()
-        val results = try {
-            toolCase.executeBatch(
-                context = toolContext,
-                toolCalls = toolInputs,
-                timeoutMillis = context.agent.toolTimeoutMs,
-            )
-        } catch (e: Exception) {
-            toolCalls.associate { tc ->
-                tc.id to com.heyanle.priestess.bot.tool.ToolResult(
-                    success = false,
-                    error = "Tool execution failed: ${e.message}",
-                    errorCode = "TOOL_EXECUTION_FAILED",
-                )
-            }
+        val step = currentStep + 1
+
+        // Execution order is the scheduler's business; append order never is. Observations are appended
+        // afterwards in submission order, so a concurrent step still produces a deterministic transcript.
+        val outcomes = toolScheduler.execute(toolCalls) { call ->
+            toolCallExecutor.execute(context, toolContext, call, step, hooks)
         }
-
-        for (tc in toolCalls) {
-            val result = results[tc.id] ?: continue
-            val toolMsg = ConversationMessage.tool(
-                toolCallId = tc.id,
-                name = tc.name,
-                content = if (result.success) materializeResult(result.output) else result.error,
-            )
-            context.messages.add(toolMsg)
-
-            val toolResultResponse = AgentResponse.ToolExecuted(
-                toolCallId = tc.id,
-                toolName = tc.name,
-                toolResult = result,
-            )
-            hooks?.onToolEnd(context, tc.name, toolResultResponse)
+        outcomes.forEach { outcome ->
+            toolCallExecutor.appendObservation(context, outcome, hooks)
         }
 
         return AgentResponse.Thinking(response.content)
@@ -223,15 +258,26 @@ class ReActRunner(
 
     private suspend fun forceFinalResponseAfterMaxSteps(): AgentResponse {
         context.messages.add(ConversationMessage.user(MAX_STEPS_REACHED_PROMPT))
+        val stepStarted = System.nanoTime()
+        context.executionTrace?.record(TraceCategory.AGENT, "step.started", buildJsonObject {
+            put("forcedFinal", true)
+        }, step = currentStep + 1)
         return try {
             refreshSystemMessage()
             val compressed = contextManager.compress(
                 agent = context.agent,
                 messages = context.messages,
                 systemMessage = systemMessage,
+                summarizer = summarizer,
             )
-            val response = provider.textChat(
-                LLMRequest(model = context.agent.model, messages = compressed, tools = emptyList()),
+            val response = requestModel(
+                LLMRequest(
+                    model = context.agent.model,
+                    messages = compressed,
+                    tools = emptyList(),
+                    temperature = context.agent.temperature,
+                    maxTokens = context.agent.maxOutputTokens,
+                ),
             )
             val content = response.content.ifBlank { "工具调用次数已达到上限，当前无法继续执行工具。" }
             val final = AgentResponse.Final(content)
@@ -240,6 +286,8 @@ class ReActRunner(
             state = AgentState.DONE
             hooks?.onAgentDone(context, final)
             final
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             val final = AgentResponse.Final(
                 "已达到工具调用上限，且最终总结请求未完成。请基于已执行的工具结果继续处理，或简化后重试。",
@@ -249,6 +297,10 @@ class ReActRunner(
             state = AgentState.DONE
             hooks?.onAgentDone(context, final)
             final
+        } finally {
+            context.executionTrace?.record(TraceCategory.AGENT, "step.finished", buildJsonObject {
+                put("state", state.name); put("forcedFinal", true)
+            }, step = currentStep + 1, durationMillis = (System.nanoTime() - stepStarted) / 1_000_000)
         }
     }
 
@@ -259,41 +311,17 @@ class ReActRunner(
             session = context.session,
             agentName = context.agent.name,
             model = context.agent.model,
-            metadata = context.metadata,
+            metadata = context.metadata + effectiveToolMetadata(),
             scopedTools = context.scopedTools,
             skillState = context.skillState,
             permissionGroup = context.permissionGroup,
+            minimumToolPermissionGroups = context.agent.minimumToolPermissionGroups,
+            responseIntent = context.responseIntent,
         )
     }
 
-    private fun materializeResult(content: String): String {
-        if (estimateTokens(content) <= context.agent.toolResultInlineTokens) return content
-        val stored = runCatching {
-            overflowStore.store(context.conversationId, content, context.agent.toolResultTtlSeconds, context.agent.toolResultMaxBytes, context.agent.toolResultStoreMaxBytes)
-        }.getOrNull()
-        val preview = preview(content, context.agent.toolResultPreviewTokens)
-        val sourceTruncated = Regex("\\\"truncated\\\"\\s*:\\s*true").containsMatchIn(content)
-        val sourceMarker = if (sourceTruncated) " source_truncated=true" else ""
-        return if (stored != null) {
-            "$preview\n\n[TOOL_RESULT_OVERFLOW result_id=${stored.id} total_code_points=${stored.totalCodePoints}$sourceMarker. Use read_tool_result with this result_id and an offset to read more.]"
-        } else {
-            "$preview\n\n[TOOL_RESULT_OVERFLOW_UNAVAILABLE The full output could not be retained.]"
-        }
-    }
-
-    private fun preview(content: String, budget: Int): String {
-        var end = content.length
-        while (end > 0 && estimateTokens(content.substring(0, end)) > budget) end = (end / 2).coerceAtLeast(0)
-        return content.substring(0, end)
-    }
-
-    private fun estimateTokens(text: String): Int {
-        val chinese = text.count { it in '\u4e00'..'\u9fff' || it in '\u3400'..'\u4dbf' }
-        return (chinese / 1.5 + (text.length - chinese) / 4.0).toInt().coerceAtLeast(1)
-    }
-
     private fun workspaceScopedTools(): List<FunctionTool> {
-        val allowed = workspaceToolNames()
+        val allowed = context.agent.effectiveToolIds ?: workspaceToolNames()
         val tools = (toolCase.getAll() + context.scopedTools)
             .distinctBy { it.schema.name }
         val workspaceVisible = if (allowed == null) {
@@ -302,9 +330,22 @@ class ReActRunner(
             tools.filter { it.schema.name in allowed }
         }
         return workspaceVisible.filter { tool ->
-            tool.schema.requiredPermissionGroup != PermissionGroup.SUPER_ADMIN ||
-                context.permissionGroup.satisfies(PermissionGroup.SUPER_ADMIN)
+            val requiredPermission = requiredPermission(tool)
+            val permissionAllowed = if (context.agent.strictPermissionToolFiltering) {
+                context.permissionGroup.satisfies(requiredPermission)
+            } else {
+                requiredPermission != PermissionGroup.SUPER_ADMIN ||
+                    context.permissionGroup.satisfies(PermissionGroup.SUPER_ADMIN)
+            }
+            tool.schema.name !in context.agent.deniedToolIds &&
+                tool.schema.riskLevel in context.agent.allowedRiskLevels &&
+                permissionAllowed
         }
+    }
+
+    private fun effectiveToolMetadata(): Map<String, String> {
+        val names = workspaceScopedTools().map { it.schema.name }.sorted().joinToString(",")
+        return mapOf("workspaceToolNames" to names)
     }
 
     private fun workspaceToolNames(): Set<String>? {
@@ -315,73 +356,28 @@ class ReActRunner(
             .toSet()
     }
 
-    private fun buildSystemPrompt(): String {
-        val toolBlock = renderToolBlock(workspaceScopedTools())
-        val skillBlock = renderSkillBlock()
-        return buildString {
-            append("## Platform")
-            append("\n")
-            append("Platform: ")
-            append(context.platform?.metadata?.name ?: context.session?.platformName ?: "unknown")
-            context.session?.let { session ->
-                append("\nSession: ")
-                append(session.type.name.lowercase())
-                append(" / ")
-                append(session.id)
-            }
-            append("\n\n## Formatting")
-            append("\n")
-            append("Your responses MUST use Markdown formatting:")
-            append("\n- Use **bold** for emphasis and headings")
-            append("\n- Use *italic* for secondary emphasis")
-            append("\n- Use `inline code` for code, commands, or technical terms")
-            append("\n- Use ```code blocks``` for multi-line code")
-            append("\n- Use bullet lists and numbered lists as appropriate")
-            append("\n- Use ### headings for structuring long responses")
-            append("\n\n## Role Document")
-            append("\n")
-            append(context.agent.instructions.trim())
-            append("\n\n## Tools")
-            append("\n")
-            append(toolBlock)
-            append("\n\n## Loaded Skills")
-            append("\n")
-            append(skillBlock)
-        }.trim()
-    }
+    private val presetDefinition = AgentPresetRegistry.of(context.agent.preset)
 
-    private fun renderToolBlock(tools: List<FunctionTool>): String {
-        if (tools.isEmpty()) return "No tools are currently available."
-        return buildString {
-            append("Available tools:")
-            tools.forEachIndexed { index, tool ->
-                append("\n")
-                append(index + 1)
-                append(". ")
-                append(tool.schema.name)
-                append(" - ")
-                append(toolDescription(tool))
-            }
-        }
-    }
+    /**
+     * The preset decides which sections appear and in what order; one assembler serves every preset.
+     * Tool schemas travel to the provider as native function definitions, and tools the caller cannot use
+     * are already filtered out by [workspaceScopedTools], so the prompt never advertises unavailable
+     * capabilities.
+     */
+    private val systemPromptAssembler = SystemPromptAssembler(
+        sections = presetDefinition.sections,
+        identityTemplate = presetDefinition.identityTemplate,
+        instructions = presetDefinition.instructionsDocument?.let {
+            AgentDirectoryInstructionsRenderer(it.fileNames, it.maxBytes)
+        },
+    )
 
-    private fun renderSkillBlock(): String {
-        return buildString {
-            append("Available skills:\n")
-            append(context.skillState.renderAvailableSkillBlock())
-            append("\n")
-            append(context.skillState.renderLoadedSkillBlock())
-        }
-    }
+    private fun buildSystemPrompt(): String = systemPromptAssembler.assemble(context, workspaceScopedTools())
 
-    private fun toolDescription(tool: FunctionTool): String {
-        val required = tool.schema.requiredPermissionGroup
-        return if (required == PermissionGroup.ADMIN && !context.permissionGroup.satisfies(required)) {
-            tool.schema.description + " 当前权限不足：需要 $required。"
-        } else {
-            tool.schema.description
-        }
-    }
+    private fun requiredPermission(tool: FunctionTool): PermissionGroup = maxOf(
+        tool.schema.requiredPermissionGroup,
+        context.agent.minimumToolPermissionGroups[tool.schema.name] ?: PermissionGroup.OPERATOR,
+    )
 
     private companion object {
         const val MAX_STEPS_REACHED_PROMPT = "Maximum tool call limit reached. Stop calling tools and, based on the information already gathered, give the user a concise final answer."

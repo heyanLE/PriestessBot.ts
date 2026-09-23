@@ -17,6 +17,10 @@ data class PersonaMemoryInjectionContext(
     val message: String,
     val maxMemories: Int = 3,
     val allowedPersonaIds: Set<String>? = null,
+    val selectedPersonaId: String? = null,
+    val memoryLibraryIds: Set<String>? = null,
+    val allowedMemoryScopes: Set<com.heyanle.priestess.bot.memory.MemoryScope>? = null,
+    val exampleTokenBudget: Int = 512,
 )
 
 /**
@@ -26,6 +30,7 @@ data class PersonaMemoryInjection(
     val instructions: String,
     val metadata: Map<String, String>,
     val persona: Persona?,
+    val exampleDialogs: List<PersonaExampleDialog>,
     val memories: List<MemorySearchResult>,
 ) {
     val hasContent: Boolean
@@ -49,26 +54,29 @@ class PersonaMemoryInjector(
         require(workspaceId.isNotBlank()) { "Workspace id must not be blank" }
         require(agentName.isNotBlank()) { "Agent name must not be blank" }
 
-        val persona = resolvePersona(workspaceId, agentName, context.allowedPersonaIds)
+        val persona = resolvePersona(workspaceId, agentName, context.allowedPersonaIds, context.selectedPersonaId)
         val scopeContext = MemoryScopeContext(
             workspaceId = workspaceId,
             platformId = context.platformId,
             sessionId = context.sessionId,
             userId = context.userId,
             agentName = agentName,
+            libraryIds = context.memoryLibraryIds,
+            allowedScopes = context.allowedMemoryScopes,
         )
-        val memories = if (context.maxMemories <= 0) {
+        val memories = if (context.maxMemories <= 0 || context.memoryLibraryIds?.isEmpty() == true || context.allowedMemoryScopes?.isEmpty() == true) {
             emptyList()
         } else {
             memoryCase.search(
                 MemorySearchQuery(
                     query = context.message,
                     scopeContext = scopeContext,
-                    limit = context.maxMemories.coerceIn(1, 20),
+                    limit = 50,
                 ),
-            )
+            ).filter { context.allowedMemoryScopes == null || it.record.scope in context.allowedMemoryScopes }
+                .take(context.maxMemories.coerceIn(1, 20))
         }
-        val renderedSection = renderSection(persona, memories)
+        val renderedSection = renderSection(persona, memories, context.exampleTokenBudget)
         val instructions = if (renderedSection.isBlank()) {
             baseInstructions
         } else {
@@ -83,6 +91,7 @@ class PersonaMemoryInjector(
             instructions = instructions,
             metadata = metadata,
             persona = persona,
+            exampleDialogs = persona?.exampleDialogs.orEmpty(),
             memories = memories,
         )
     }
@@ -90,6 +99,7 @@ class PersonaMemoryInjector(
     private fun renderSection(
         persona: Persona?,
         memories: List<MemorySearchResult>,
+        exampleTokenBudget: Int,
     ): String {
         if (persona == null && memories.isEmpty()) return ""
         return buildString {
@@ -115,6 +125,21 @@ class PersonaMemoryInjector(
                 if (persona.systemPromptTemplate.isNotBlank()) {
                     append("\nInstructions:\n")
                     append(persona.systemPromptTemplate)
+                }
+                val counter = com.heyanle.priestess.bot.agent.context.TokenCounter()
+                var remaining = exampleTokenBudget.coerceAtLeast(0)
+                val examples = persona.exampleDialogs.mapNotNull { example ->
+                    val text = kotlinx.serialization.json.buildJsonObject {
+                        put("example_user", kotlinx.serialization.json.JsonPrimitive(example.user))
+                        put("example_assistant", kotlinx.serialization.json.JsonPrimitive(example.assistant))
+                    }.toString()
+                    val tokens = counter.countText(text)
+                    if (tokens > remaining) null else text.also { remaining -= tokens }
+                }
+                if (examples.isNotEmpty()) {
+                    append("\n\n### Fictional style examples — not conversation history\n")
+                    append("These invented pairs demonstrate tone only. They are not facts about this user, past requests, completed actions, relationships, or memory. Follow the actual current request; never continue an example.\n")
+                    examples.forEach { append(it).append('\n') }
                 }
             }
             if (memories.isNotEmpty()) {
@@ -145,12 +170,19 @@ class PersonaMemoryInjector(
         if (persona != null) {
             metadata["injectedPersonaId"] = persona.id
             metadata["injectedPersonaName"] = persona.name
+            metadata["injected_persona_id"] = persona.id
+            metadata["injected_persona_name"] = persona.name
+            metadata["injectedExampleDialogCount"] = persona.exampleDialogs.size.toString()
+            metadata["injected_example_dialog_count"] = persona.exampleDialogs.size.toString()
         }
         if (memories.isNotEmpty()) {
             metadata["injectedMemoryIds"] = memories.joinToString(",") { it.record.id }
             metadata["injectedMemoryReasons"] = memories.joinToString(" | ") { "${it.record.id}:${it.matchReason}" }
+            metadata["injected_memory_ids"] = memories.joinToString(",") { it.record.id }
+            metadata["injected_memory_reasons"] = memories.joinToString(" | ") { "${it.record.id}:${it.matchReason}" }
         }
         metadata["injectedMemoryCount"] = memories.size.toString()
+        metadata["injected_memory_count"] = memories.size.toString()
         return metadata
     }
 
@@ -158,7 +190,13 @@ class PersonaMemoryInjector(
         workspaceId: String,
         agentName: String,
         allowedPersonaIds: Set<String>?,
+        selectedPersonaId: String?,
     ): Persona? {
+        if (selectedPersonaId != null) {
+            return personaCase.list(workspaceId).firstOrNull {
+                it.id == selectedPersonaId && it.enabled && (allowedPersonaIds == null || it.id in allowedPersonaIds)
+            } ?: error("Selected persona '$selectedPersonaId' is missing or disabled")
+        }
         if (allowedPersonaIds == null) {
             return personaCase.resolve(workspaceId, agentName)
         }

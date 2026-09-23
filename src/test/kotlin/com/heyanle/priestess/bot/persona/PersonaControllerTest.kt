@@ -4,6 +4,7 @@ import com.heyanle.priestess.bot.testkit.testPersonaCase
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -21,6 +22,12 @@ class PersonaControllerTest {
                 tone = "  concise  ",
                 boundaries = listOf(" no secrets ", "", "no secrets", "cite uncertainty"),
                 systemPromptTemplate = "  Prefer short answers.  ",
+                exampleDialogs = listOf(
+                    PersonaExampleDialog(
+                        user = "  The task failed.  ",
+                        assistant = "  Keep the logs; I will inspect the failed step.  ",
+                    ),
+                ),
                 agentNames = listOf(" assistant ", "", "assistant", "reviewer"),
                 errorMessages = PersonaErrorMessages(permissionDenied = " denied "),
             ),
@@ -41,6 +48,10 @@ class PersonaControllerTest {
         assertEquals("concise", loaded.tone)
         assertEquals(listOf("no secrets", "cite uncertainty"), loaded.boundaries)
         assertEquals("Prefer short answers.", loaded.systemPromptTemplate)
+        assertEquals(
+            listOf(PersonaExampleDialog("The task failed.", "Keep the logs; I will inspect the failed step.")),
+            loaded.exampleDialogs,
+        )
         assertEquals(listOf("assistant", "reviewer"), loaded.agentNames)
         assertEquals("denied", loaded.errorMessages.permissionDenied)
         assertTrue(loaded.enabled)
@@ -137,5 +148,29 @@ class PersonaControllerTest {
         assertFalse(personas.delete(created.id))
         assertNull(personas.get(created.id))
         assertTrue(personas.list("workspace-a").isEmpty())
+    }
+
+    @Test
+    fun `upsert rejects incomplete or excessive example dialogs`() {
+        val personas = testPersonaCase("persona-examples-validation")
+
+        assertFailsWith<IllegalArgumentException> {
+            personas.upsert(
+                PersonaUpsertRequest(
+                    workspaceId = "workspace-a",
+                    name = "invalid",
+                    exampleDialogs = listOf(PersonaExampleDialog(user = "hello", assistant = " ")),
+                ),
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            personas.upsert(
+                PersonaUpsertRequest(
+                    workspaceId = "workspace-a",
+                    name = "too-many",
+                    exampleDialogs = List(21) { PersonaExampleDialog("user-$it", "assistant-$it") },
+                ),
+            )
+        }
     }
 }

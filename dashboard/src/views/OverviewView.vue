@@ -1,548 +1,239 @@
 <template>
   <div class="overview-page">
-    <section class="panel overview-hero">
-      <div class="overview-hero-copy">
-        <span class="overview-eyebrow">Overview</span>
-        <h1>Keep the runtime healthy.</h1>
-        <p>
-          Monitor incidents, effective runtime, validation signals, and recent traffic from one
-          clean operator workspace.
-        </p>
+    <div class="overview-statusbar">
+      <div class="overview-status-copy">
+        <span class="inline-status" :class="healthTone">{{ healthLabel }}</span>
+        <span>{{ store.lastUpdated ? `更新于 ${clock(store.lastUpdated)}` : '正在读取运行状态' }}</span>
       </div>
+      <RouterLink class="overview-text-link" to="/logs/system">系统日志 <span aria-hidden="true">↗</span></RouterLink>
+    </div>
 
-      <div class="overview-hero-actions">
-        <RouterLink class="button-link" to="/logs">Open logs</RouterLink>
-        <RouterLink class="button-link" to="/effective-runtime">Inspect runtime</RouterLink>
-        <RouterLink class="button-link primary" to="/agent">Run validation</RouterLink>
+    <p v-if="store.error || configuration.error" class="notice error" role="alert">{{ store.error || configuration.error }}</p>
+
+    <section class="surface-section overview-chain">
+      <div class="section-title">
+        <div><h2>消息处理链路</h2><p>从消息接入到模型响应，查看已保存的配置。</p></div>
+        <span v-if="configuration.dirty" class="overview-context-note">编辑中的草稿尚未计入</span>
+      </div>
+      <div class="chain-stages">
+        <RouterLink v-for="(stage, index) in chainStages" :key="stage.label" :to="stage.to" class="chain-stage">
+          <div class="chain-stage-label"><span class="chain-index">0{{ index + 1 }}</span><span>{{ stage.label }}</span><span class="chain-open" aria-hidden="true">↗</span></div>
+          <div class="chain-stage-value">{{ stage.value }}<span>{{ stage.unit }}</span></div>
+          <p>{{ stage.detail }}</p>
+          <span v-if="index < chainStages.length - 1" class="chain-arrow" aria-hidden="true">→</span>
+        </RouterLink>
+      </div>
+      <div class="chain-footnote">
+        <span><i class="overview-live-dot" aria-hidden="true"></i>{{ store.runningPlatforms }} 个 IM 正在运行</span>
+        <span>{{ assignedAgents }} 个 Agent 已被启用的路由引用</span>
+        <RouterLink to="/ims">检查路由配置 <span aria-hidden="true">→</span></RouterLink>
       </div>
     </section>
 
-    <section class="overview-metric-grid">
-      <article v-for="metric in metrics" :key="metric.label" class="card overview-metric-card">
-        <span class="overview-metric-label">{{ metric.label }}</span>
-        <strong>{{ metric.value }}</strong>
-        <p>{{ metric.detail }}</p>
-      </article>
-    </section>
-
-    <section class="overview-workbench">
-      <div class="overview-primary">
-        <article class="panel">
-          <div class="section-title">
-            <div>
-              <h2>Incident queue</h2>
-              <p>Start with the newest watchpoints and jump straight into diagnosis.</p>
-            </div>
-            <RouterLink class="button-link" to="/logs">Open traces</RouterLink>
-          </div>
-
-          <EmptyState
-            v-if="incidentItems.length === 0"
-            title="No incidents reported"
-            detail="Component health and runtime diagnostics look clear in the latest refresh."
-          />
-
-          <div v-else class="overview-incident-list">
-            <RouterLink
-              v-for="item in incidentItems"
-              :key="item.id"
-              class="overview-incident-item"
-              :to="item.to"
-            >
-              <div class="overview-incident-head">
-                <span class="inline-status" :class="item.tone">{{ item.badge }}</span>
-                <span class="overview-incident-action">{{ item.action }}</span>
-              </div>
-              <strong>{{ item.title }}</strong>
-              <p>{{ item.detail }}</p>
+    <div class="overview-workbench">
+      <section class="surface-section overview-activity">
+        <div class="section-title">
+          <div><h2>近期执行</h2><p>最新 {{ recentExecutions.length }} 条记录 · 共 {{ executionTotal?.toLocaleString() ?? '—' }} 次已记录执行</p></div>
+          <RouterLink class="overview-text-link" to="/logs/executions">全部执行 <span aria-hidden="true">→</span></RouterLink>
+        </div>
+        <p v-if="executionError" class="notice error" role="alert">{{ executionError }}</p>
+        <p v-if="executionLoading && !recentExecutions.length" class="overview-empty" role="status">正在加载执行记录…</p>
+        <div v-else-if="!recentExecutions.length && !executionError" class="overview-empty">
+          <strong>尚无执行记录</strong><p>IM 消息触发 Agent 后，可以在这里查看模型与工具的执行过程。</p><RouterLink to="/agents">打开 Agent 调试 →</RouterLink>
+        </div>
+        <ol v-else class="recent-executions">
+          <li v-for="item in recentExecutions" :key="item.id">
+            <RouterLink :to="{ path: '/logs/executions', query: { execution: item.id } }" class="recent-execution">
+              <span class="execution-status-mark" :class="statusTone(item.status)" aria-hidden="true"></span>
+              <div class="recent-execution-body"><strong>{{ item.inputPreview || '无文本输入' }}</strong><span>{{ item.platform }} <span aria-hidden="true">/</span> {{ item.agent || '未进入 Agent' }} <span aria-hidden="true">·</span> {{ item.model || '未调用模型' }}</span></div>
+              <div class="recent-execution-end"><span class="execution-state" :class="statusTone(item.status)">{{ statusLabels[item.status] }}</span><time :datetime="new Date(item.startedAt).toISOString()">{{ date(item.startedAt) }}</time></div>
+              <span class="recent-execution-arrow" aria-hidden="true">↗</span>
             </RouterLink>
-          </div>
-        </article>
+          </li>
+        </ol>
+      </section>
 
-        <article class="panel">
-          <div class="section-title">
-            <div>
-              <h2>Recent conversations</h2>
-              <p>Use live traffic as the fastest way to verify behavior after a change.</p>
-            </div>
-            <RouterLink class="button-link" to="/conversations">All sessions</RouterLink>
-          </div>
-
-          <EmptyState
-            v-if="recentConversations.length === 0"
-            title="No conversations yet"
-            detail="Once a platform starts receiving traffic, the newest sessions will appear here."
-          />
-
-          <div v-else class="table-wrap">
-            <table class="table">
-              <thead>
-                <tr>
-                  <th>Platform</th>
-                  <th>Session</th>
-                  <th>Updated</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="conversation in recentConversations" :key="conversation.id" class="clickable-row">
-                  <td>{{ conversation.platform }}</td>
-                  <td>
-                    <RouterLink :to="`/conversations/${conversation.id}`">
-                      <code>{{ conversation.sessionId }}</code>
-                    </RouterLink>
-                  </td>
-                  <td>{{ formatTime(conversation.updatedAt) }}</td>
-                  <td>
-                    <span class="inline-status" :class="recencyTone(conversation.updatedAt)">
-                      {{ recencyLabel(conversation.updatedAt) }}
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </article>
-      </div>
-
-      <aside class="overview-secondary">
-        <article class="panel">
-          <div class="section-title">
-            <div>
-              <h2>Effective runtime</h2>
-              <p>See what is actually in effect before touching persistent config.</p>
-            </div>
-            <RouterLink class="button-link" to="/effective-runtime">Open</RouterLink>
-          </div>
-
-          <div class="detail-list">
-            <div class="detail-item">
-              <span>Workspace</span>
-              <strong>{{ runtimeWorkspace }}</strong>
-            </div>
-            <div class="detail-item">
-              <span>Agent</span>
-              <strong>{{ runtimeAgent }}</strong>
-            </div>
-            <div class="detail-item">
-              <span>Provider</span>
-              <strong>{{ runtimeProvider }}</strong>
-            </div>
-            <div class="detail-item">
-              <span>Tool policy</span>
-              <strong>{{ toolPolicySummary }}</strong>
-            </div>
-            <div class="detail-item">
-              <span>Detected skills</span>
-              <strong>{{ detectedSkills }}</strong>
-            </div>
-            <div class="detail-item">
-              <span>Trace rows</span>
-              <strong>{{ traceRowCount }}</strong>
-            </div>
-          </div>
-        </article>
-
-        <article class="panel">
-          <div class="section-title">
-            <div>
-              <h2>Validation snapshot</h2>
-              <p>Close the loop after every change with one bench and one runtime check.</p>
-            </div>
-            <RouterLink class="button-link primary" to="/agent">Validate</RouterLink>
-          </div>
-
-          <div class="overview-check-list">
-            <div class="overview-check-item">
-              <span class="inline-status" :class="validationTone.manifest">{{ validationLabel.manifest }}</span>
-              <div>
-                <strong>Workspace manifest</strong>
-                <p>{{ validationCopy.manifest }}</p>
-              </div>
-            </div>
-            <div class="overview-check-item">
-              <span class="inline-status" :class="validationTone.runtime">{{ validationLabel.runtime }}</span>
-              <div>
-                <strong>Runtime trace</strong>
-                <p>{{ validationCopy.runtime }}</p>
-              </div>
-            </div>
-            <div class="overview-check-item">
-              <span class="inline-status" :class="validationTone.conversations">{{ validationLabel.conversations }}</span>
-              <div>
-                <strong>Traffic visibility</strong>
-                <p>{{ validationCopy.conversations }}</p>
-              </div>
-            </div>
-          </div>
-        </article>
-
-        <article class="panel">
-          <div class="section-title">
-            <div>
-              <h2>Next actions</h2>
-              <p>Jump into the parts of the runtime that operators usually touch next.</p>
-            </div>
-          </div>
-
-          <div class="overview-action-grid">
-            <RouterLink class="overview-action-card" to="/workspaces">
-              <strong>Workspaces</strong>
-              <small>Reload routing and inspect snapshots.</small>
-            </RouterLink>
-            <RouterLink class="overview-action-card" to="/providers">
-              <strong>Providers</strong>
-              <small>Check capability coverage and connectivity.</small>
-            </RouterLink>
-            <RouterLink class="overview-action-card" to="/tools">
-              <strong>Tools</strong>
-              <small>Review policy posture and exposure.</small>
-            </RouterLink>
-            <RouterLink class="overview-action-card" to="/config">
-              <strong>Config</strong>
-              <small>Apply controlled changes to runtime config.</small>
-            </RouterLink>
-          </div>
-        </article>
+      <aside class="surface-section overview-attention">
+        <div class="section-title"><div><h2>需要关注 <span v-if="attentionItems.length" class="attention-count">{{ attentionItems.length }}</span></h2><p>连接、配置与最近的执行异常。</p></div></div>
+        <div v-if="!store.health && !savedConfig" class="overview-empty"><p>运行数据加载后显示检查结果。</p></div>
+        <div v-else-if="!attentionItems.length" class="attention-clear"><span class="attention-check" aria-hidden="true">✓</span><strong>当前没有待处理项</strong><p>{{ executionError || executionLoading ? '健康检查未报告异常，执行记录尚未加载完成。' : '健康检查未报告异常，最近加载的执行中也没有失败记录。' }}</p></div>
+        <ul v-else class="attention-list">
+          <li v-for="item in attentionItems" :key="item.id"><RouterLink :to="item.to"><span class="attention-kind" :class="item.tone">{{ item.badge }}</span><strong>{{ item.title }}</strong><p>{{ item.detail }}</p><span class="attention-action">{{ item.action }} <span aria-hidden="true">→</span></span></RouterLink></li>
+        </ul>
       </aside>
+    </div>
+
+    <section class="surface-section overview-conversations">
+      <div class="section-title"><div><h2>最近会话</h2><p>跨 IM 查看最近活跃的对话。</p></div><RouterLink class="overview-text-link" to="/conversations">全部会话 <span aria-hidden="true">→</span></RouterLink></div>
+      <div v-if="!recentConversations.length" class="overview-empty compact"><p>还没有会话。收到并处理消息后，会话历史会显示在这里。</p></div>
+      <div v-else class="table-wrap"><table class="table overview-conversation-table"><thead><tr><th>IM</th><th>会话 ID</th><th>最近更新</th><th><span class="sr-only">操作</span></th></tr></thead><tbody><tr v-for="conversation in recentConversations" :key="conversation.id"><td>{{ conversation.platform }}</td><td><RouterLink :to="`/conversations/${conversation.id}`"><code>{{ conversation.sessionId }}</code></RouterLink></td><td>{{ date(conversation.updatedAt) }}</td><td><RouterLink :to="`/conversations/${conversation.id}`" :aria-label="`查看会话 ${conversation.sessionId}`">查看 <span aria-hidden="true">↗</span></RouterLink></td></tr></tbody></table></div>
     </section>
+
+    <details class="surface-section overview-system">
+      <summary><span>系统信息</span><small>配置来源、运行时间与平台资源</small></summary>
+      <dl class="overview-system-grid"><div><dt>持续运行</dt><dd>{{ uptime }}</dd></div><div><dt>当前快照</dt><dd>{{ store.health?.diagnostics.activeSnapshotVersion || '—' }}</dd></div><div><dt>平台资源</dt><dd>{{ savedConfig?.skillLibraries.length ?? 0 }} 个 Skill 库 · {{ savedConfig?.memoryLibraries.length ?? 0 }} 个记忆库 · {{ savedConfig?.mcpServers.length ?? 0 }} 个 MCP 服务</dd></div><div><dt>配置文件</dt><dd><code>{{ configuration.sourcePath || store.health?.diagnostics.configPath || '未加载' }}</code></dd></div><div><dt>平台目录</dt><dd><code>{{ store.health?.diagnostics.platformDirectory || savedConfig?.platformDirectory || '未加载' }}</code></dd></div><div><dt>数据库</dt><dd><code>{{ store.health?.diagnostics.databasePath || '未加载' }}</code></dd></div></dl>
+    </details>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
-import EmptyState from '../components/EmptyState.vue';
+import { executionsApi, type ExecutionSummary } from '../api/executions';
+import type { ApplicationConfig } from '../models/configV3';
 import { useDashboardStore } from '../stores/dashboard';
-
-type Tone = 'ok' | 'warn' | 'muted' | 'error';
+import { useConfigV3Store } from '../stores/configV3';
 
 const store = useDashboardStore();
-
-const runtimeConfig = computed(() => store.effectiveRuntimePreview?.config ?? store.config);
-const runtimeWorkingDirectory = computed(() => store.effectiveRuntimePreview?.workingDirectory ?? store.workingDirectory);
-const traceRowCount = computed(() => store.effectiveRuntimePreview?.trace.length ?? 0);
-const detectedSkills = computed(() => String(runtimeWorkingDirectory.value?.skills.length ?? 0));
-const runtimeWorkspace = computed(() => runtimeWorkingDirectory.value?.effectivePath || 'Not set');
-const runtimeAgent = computed(() => runtimeConfig.value?.agent.name || 'Unset');
-const runtimeProvider = computed(() => runtimeConfig.value?.agent.providerName || 'Unset');
-const toolPolicySummary = computed(() => {
-  const enabled = runtimeConfig.value?.agent.enabledTools.length ?? 0;
-  const disabled = runtimeConfig.value?.agent.disabledTools.length ?? 0;
-  return `${enabled} enabled · ${disabled} denied`;
+const configuration = useConfigV3Store();
+const recentExecutions = ref<ExecutionSummary[]>([]);
+const executionTotal = ref<number | null>(null);
+const executionLoading = ref(false);
+const executionError = ref('');
+let executionRequest = 0;
+const savedConfig = computed<ApplicationConfig | null>(() => {
+  try { return configuration.baseline ? JSON.parse(configuration.baseline) as ApplicationConfig : null; }
+  catch { return null; }
 });
-
-const componentAlerts = computed(() =>
-  Object.entries(store.health?.components ?? {})
-    .filter(([, status]) => toneForStatus(status) !== 'ok')
-    .map(([name, status]) => ({
-      id: `component-${name}`,
-      title: humanize(name),
-      detail: `${status} reported by the health endpoint. Review runtime traces and related assets.`,
-      tone: toneForStatus(status),
-      badge: status,
-      action: 'Inspect',
-      to: '/logs',
-    })),
-);
-
-const diagnosticAlerts = computed(() =>
-  Object.entries(store.health?.diagnostics ?? {})
-    .slice(0, 4)
-    .map(([key, value]) => ({
-      id: `diagnostic-${key}`,
-      title: humanize(key),
-      detail: String(value),
-      tone: String(value).toLowerCase().includes('missing') || String(value).toLowerCase().includes('error') ? 'warn' : 'muted',
-      badge: 'Diagnostic',
-      action: 'Review',
-      to: '/effective-runtime',
-    })),
-);
-
-const incidentItems = computed(() => [...componentAlerts.value, ...diagnosticAlerts.value].slice(0, 6));
-
-const recentConversations = computed(() =>
-  [...store.conversations].sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 6),
-);
-
-const metrics = computed(() => [
-  {
-    label: 'Overall health',
-    value: store.health?.status ?? 'Unknown',
-    detail: store.health ? `${componentAlerts.value.length} components need review right now.` : 'Awaiting runtime telemetry.',
-  },
-  {
-    label: 'Running platforms',
-    value: `${store.runningPlatforms}/${store.platforms.length || 0}`,
-    detail: `${store.enabledPlatforms} enabled lanes ready to receive traffic.`,
-  },
-  {
-    label: 'Tracked sessions',
-    value: `${store.conversations.length}`,
-    detail: `${new Set(store.conversations.map((conversation) => conversation.platform)).size} platforms represented in the latest feed.`,
-  },
-  {
-    label: 'Providers',
-    value: `${store.providers.length}`,
-    detail: `${store.providers.filter((provider) => provider.supportToolCalling).length} tool-ready and ${store.providers.filter((provider) => provider.supportVision).length} vision-ready.`,
-  },
-  {
-    label: 'Trace rows',
-    value: `${traceRowCount.value}`,
-    detail: 'Effective runtime rows currently available for inspection.',
-  },
-  {
-    label: 'Plugins enabled',
-    value: `${store.enabledPlugins}/${store.plugins.plugins.length || 0}`,
-    detail: `${store.plugins.extensions.length} extensions currently mapped into the runtime.`,
-  },
+const activeIms = computed(() => savedConfig.value?.ims.filter(item => item.enabled) ?? []);
+const activeAgents = computed(() => savedConfig.value?.agents.filter(item => item.enabled) ?? []);
+const activeLlms = computed(() => savedConfig.value?.llms.filter(item => item.enabled) ?? []);
+const activeRoutes = computed(() => activeIms.value.flatMap(im => im.routes.filter(route => route.enabled)));
+const assignedAgents = computed(() => new Set(activeRoutes.value.filter(route => route.action.type === 'AGENT').map(route => route.action.agentId).filter(id => activeAgents.value.some(agent => agent.id === id))).size);
+const chainStages = computed(() => [
+  { label: 'IM 接入', value: savedConfig.value ? activeIms.value.length : '—', unit: '个启用', detail: `${savedConfig.value?.ims.length ?? 0} 个连接配置`, to: '/ims' },
+  { label: '消息路由', value: savedConfig.value ? activeRoutes.value.length : '—', unit: '条启用', detail: `${activeRoutes.value.filter(route => route.action.type === 'COMMAND').length} 条命令路由，按顺序匹配`, to: '/ims' },
+  { label: 'Agent', value: savedConfig.value ? activeAgents.value.length : '—', unit: '个启用', detail: '独立的模型与资源装配', to: '/agents' },
+  { label: 'LLM 连接', value: savedConfig.value ? activeLlms.value.length : '—', unit: '个启用', detail: `${new Set(activeAgents.value.map(agent => agent.llm.providerRef)).size} 个连接被 Agent 使用`, to: '/llms' },
 ]);
-
-const validationTone = computed(() => ({
-  manifest: runtimeWorkingDirectory.value?.manifestFound ? 'ok' : 'warn',
-  runtime: traceRowCount.value > 0 ? 'ok' : 'muted',
-  conversations: recentConversations.value.length > 0 ? 'ok' : 'muted',
-}));
-
-const validationLabel = computed(() => ({
-  manifest: runtimeWorkingDirectory.value?.manifestFound ? 'Ready' : 'Missing',
-  runtime: traceRowCount.value > 0 ? 'Trace loaded' : 'No trace',
-  conversations: recentConversations.value.length > 0 ? 'Visible' : 'No traffic',
-}));
-
-const validationCopy = computed(() => ({
-  manifest: runtimeWorkingDirectory.value?.manifestFound
-    ? 'Local workspace inputs were discovered and merged into the runtime preview.'
-    : 'No runtime workdir manifest is currently contributing to the merged result.',
-  runtime: traceRowCount.value > 0
-    ? 'Effective runtime data is available to validate before saving config changes.'
-    : 'Refresh config surfaces to populate the layered runtime trace.',
-  conversations: recentConversations.value.length > 0
-    ? 'Recent traffic is available for replay and post-change validation.'
-    : 'No recent sessions yet. Use the agent bench when validating changes.',
-}));
-
-function toneForStatus(value: string | undefined): Tone {
-  const normalized = String(value ?? '').trim().toUpperCase();
-  if (!normalized || normalized === 'UNKNOWN') return 'muted';
-  if (['UP', 'OK', 'HEALTHY', 'RUNNING', 'ENABLED', 'READY'].some((token) => normalized.includes(token))) return 'ok';
-  if (['WARN', 'DEGRADED', 'PARTIAL', 'STARTING', 'MISSING'].some((token) => normalized.includes(token))) return 'warn';
-  if (['IDLE', 'PENDING', 'DISABLED', 'STOPPED'].some((token) => normalized.includes(token))) return 'muted';
-  return 'error';
+const statusLabels = { RUNNING: '运行中', SUCCEEDED: '成功', FAILED: '失败', CANCELLED: '已取消', SKIPPED: '已跳过' };
+function statusTone(status: string) { return status === 'FAILED' ? 'error' : status === 'RUNNING' ? 'warn' : status === 'SUCCEEDED' ? 'ok' : 'muted'; }
+const healthTone = computed(() => !store.health ? 'muted' : ['UP', 'OK', 'HEALTHY'].includes(store.health.status.toUpperCase()) ? 'ok' : 'warn');
+const healthLabel = computed(() => !store.health ? '状态待加载' : healthTone.value === 'ok' ? '服务运行正常' : '服务需要检查');
+const recentConversations = computed(() => [...store.conversations].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5));
+type AttentionItem = { id: string; title: string; detail: string; badge: string; action: string; tone: string; to: string };
+const attentionItems = computed(() => {
+  const items: AttentionItem[] = [];
+  Object.entries(store.health?.components ?? {}).filter(([key, status]) => !key.endsWith('Error') && /^(DEGRADED|DOWN|ERROR|FAILED|UNHEALTHY)$/i.test(status)).forEach(([key, status]) => {
+    items.push({ id: key, title: `${componentName(key)}需要检查`, detail: `健康接口报告 ${status}。`, badge: '运行异常', action: '检查系统日志', tone: 'error', to: '/logs/system' });
+  });
+  const pending = Number(store.health?.diagnostics.pendingRestartCount ?? 0);
+  if (pending > 0) items.push({ id: 'restart', title: `${pending} 项配置等待重启`, detail: '已保存的变更将在服务重启后生效。', badge: '待生效', action: '查看系统设置', tone: 'warn', to: '/config' });
+  const diagnostic = store.health?.diagnostics.configurationDiagnostics ?? '';
+  if (/(ERROR|WARNING):[1-9]\d*/.test(diagnostic)) items.push({ id: 'diagnostics', title: '配置诊断需要处理', detail: diagnostic, badge: '配置', action: '检查配置', tone: 'warn', to: '/config' });
+  if (savedConfig.value) {
+    if (!activeIms.value.length) items.push({ id: 'im', title: '尚未启用 IM 连接', detail: '配置消息接入后，机器人才能在对应平台工作。', badge: '待配置', action: '配置 IM', tone: 'muted', to: '/ims' });
+    else if (activeIms.value.some(im => !im.routes.some(route => route.enabled))) items.push({ id: 'routes', title: '有 IM 尚无启用路由', detail: '未匹配路由的消息不会触发 Agent。', badge: '待配置', action: '添加消息路由', tone: 'warn', to: '/ims' });
+    if (!activeAgents.value.length) items.push({ id: 'agents', title: '尚未启用 Agent', detail: '选择模型并装配资源，开始处理消息。', badge: '待配置', action: '配置 Agent', tone: 'muted', to: '/agents' });
+    else if (!activeLlms.value.length) items.push({ id: 'llms', title: '尚无启用的 LLM 连接', detail: 'Agent 需要可用的模型连接。', badge: '待配置', action: '配置 LLM', tone: 'warn', to: '/llms' });
+  }
+  const stopped = store.platforms.filter(item => item.enabled && !item.running);
+  if (stopped.length) items.push({ id: 'stopped', title: `${stopped.length} 个已启用 IM 未运行`, detail: stopped.map(item => item.name).join('、'), badge: '连接', action: '检查 IM', tone: 'warn', to: '/ims' });
+  const failed = recentExecutions.value.find(item => item.status === 'FAILED');
+  if (failed) items.push({ id: failed.id, title: '最近的执行存在失败', detail: `${failed.agent || failed.platform} · ${date(failed.startedAt)}`, badge: '执行失败', action: '查看失败原因', tone: 'error', to: `/logs/executions?execution=${encodeURIComponent(failed.id)}` });
+  return items.slice(0, 5);
+});
+const uptime = computed(() => {
+  if (!store.health) return '—';
+  const minutes = Math.floor(store.health.uptimeMillis / 60_000);
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours} 小时 ${minutes % 60} 分钟` : `${Math.floor(hours / 24)} 天 ${hours % 24} 小时`;
+});
+const clock = (value: number) => new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(value);
+const date = (value: number) => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(value);
+function componentName(value: string) { return ({ config: '配置', database: '数据库', server: '服务端', providers: '模型服务', platforms: 'IM 平台', plugins: '插件', tools: '工具', workspaceReload: '配置重载' } as Record<string, string>)[value] ?? value; }
+async function loadExecutions() {
+  const request = ++executionRequest;
+  executionLoading.value = true;
+  executionError.value = '';
+  try {
+    const response = await executionsApi.list({ limit: 6, offset: 0 });
+    if (request !== executionRequest) return;
+    recentExecutions.value = response.items;
+    executionTotal.value = response.total;
+  } catch (cause) { if (request === executionRequest) executionError.value = cause instanceof Error ? cause.message : String(cause); }
+  finally { if (request === executionRequest) executionLoading.value = false; }
 }
-
-function recencyTone(value: number): Tone {
-  const diff = Date.now() - value;
-  if (diff < 30 * 60 * 1000) return 'ok';
-  if (diff < 12 * 60 * 60 * 1000) return 'warn';
-  return 'muted';
-}
-
-function recencyLabel(value: number) {
-  const diff = Date.now() - value;
-  if (diff < 30 * 60 * 1000) return 'Fresh';
-  if (diff < 12 * 60 * 60 * 1000) return 'Warm';
-  return 'Stale';
-}
-
-function formatTime(value: number) {
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(value);
-}
-
-function humanize(value: string) {
-  return value.replace(/([A-Z])/g, ' $1').replace(/[-_]/g, ' ').replace(/^./, (first) => first.toUpperCase());
-}
+onMounted(() => { void configuration.load(); void loadExecutions(); });
+watch(() => store.lastUpdated, () => { void loadExecutions(); });
 </script>
 
 <style scoped>
-.overview-page {
-  display: grid;
-  gap: 24px;
-}
-
-.overview-hero {
-  display: flex;
-  justify-content: space-between;
-  gap: 24px;
-  align-items: end;
-}
-
-.overview-hero-copy {
-  max-width: 760px;
-}
-
-.overview-eyebrow,
-.overview-metric-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--weak);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.overview-hero h1 {
-  margin: 10px 0 12px;
-  font-size: clamp(2.4rem, 4vw, 4rem);
-  line-height: 1;
-  letter-spacing: -0.05em;
-  color: var(--text-strong);
-}
-
-.overview-hero p {
-  margin: 0;
-  max-width: 680px;
-  color: var(--muted);
-  font-size: 1rem;
-  line-height: 1.65;
-}
-
-.overview-hero-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.overview-metric-grid {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.overview-metric-card {
-  display: grid;
-  gap: 10px;
-  min-height: 148px;
-}
-
-.overview-metric-card strong {
-  font-size: 2rem;
-  line-height: 1;
-  letter-spacing: -0.06em;
-  color: var(--text-strong);
-}
-
-.overview-metric-card p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.92rem;
-  line-height: 1.5;
-}
-
-.overview-workbench {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) 360px;
-  gap: 18px;
-  align-items: start;
-}
-
-.overview-primary,
-.overview-secondary {
-  display: grid;
-  gap: 18px;
-}
-
-.overview-incident-list,
-.overview-action-grid,
-.overview-check-list {
-  display: grid;
-  gap: 12px;
-}
-
-.overview-incident-item,
-.overview-action-card {
-  display: grid;
-  gap: 8px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: var(--surface-soft);
-  color: inherit;
-  transition:
-    border-color 160ms ease,
-    background 160ms ease,
-    transform 160ms ease;
-}
-
-.overview-incident-item:hover,
-.overview-action-card:hover {
-  border-color: var(--line-strong);
-  background: var(--surface);
-  transform: translateY(-1px);
-}
-
-.overview-incident-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-}
-
-.overview-incident-action {
-  color: var(--weak);
-  font-size: 0.8rem;
-  font-weight: 600;
-}
-
-.overview-incident-item strong,
-.overview-action-card strong,
-.overview-check-item strong {
-  color: var(--text-strong);
-  font-size: 0.98rem;
-}
-
-.overview-incident-item p,
-.overview-action-card small,
-.overview-check-item p {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.overview-check-item {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 12px;
-  align-items: start;
-}
-
-@media (max-width: 1240px) {
-  .overview-metric-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .overview-workbench {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 900px) {
-  .overview-hero {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .overview-hero-actions {
-    justify-content: flex-start;
-  }
-
-  .overview-metric-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 640px) {
-  .overview-metric-grid {
-    grid-template-columns: 1fr;
-  }
-}
+.overview-page { display: grid; gap: 22px; min-width: 0; }
+.overview-statusbar, .overview-status-copy { display: flex; align-items: center; gap: 12px; }
+.overview-statusbar { justify-content: space-between; font-size: 12px; color: var(--muted); }
+.overview-text-link { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; color: var(--text-strong); font-size: 12px; font-weight: 600; }
+.overview-chain, .overview-activity, .overview-attention, .overview-conversations, .overview-system { min-width: 0; padding: 24px; background: var(--surface-strong, #fff); border: 1px solid var(--line, #DAE3EC); border-radius: 12px; }
+.overview-context-note { color: var(--muted); font-size: 11px; }
+.chain-stages { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 24px -4px 22px; }
+.chain-stage { position: relative; display: block; min-width: 0; padding: 6px 24px 6px 20px; color: inherit; border-left: 1px solid var(--line); }
+.chain-stage:first-child { border-left: 0; padding-left: 4px; }
+.chain-stage:hover .chain-stage-label { color: var(--accent); }
+.chain-stage-label { display: flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 600; color: var(--text-strong); }
+.chain-index { color: var(--weak); font-size: 10px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.chain-open { margin-left: auto; color: var(--weak); }
+.chain-stage-value { margin-top: 18px; font-size: 38px; line-height: 1.15; font-weight: 600; letter-spacing: -1.5px; font-variant-numeric: tabular-nums; color: var(--text-strong); }
+.chain-stage-value > span { margin-left: 9px; color: var(--muted); font-size: 11px; font-weight: 400; letter-spacing: 0; }
+.chain-stage p { margin: 9px 0 0; font-size: 11px; color: var(--muted); line-height: 1.5; }
+.chain-arrow { position: absolute; right: -8px; top: 51px; z-index: 1; background: var(--surface-strong, #fff); color: var(--weak); font-size: 17px; line-height: 22px; }
+.chain-footnote { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 24px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+.chain-footnote > span { display: inline-flex; align-items: center; gap: 7px; }
+.chain-footnote > a { margin-left: auto; color: var(--text-strong); }
+.overview-live-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }
+.overview-workbench { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(260px, 1fr); gap: 22px; align-items: start; }
+.recent-executions, .attention-list { margin: 0; padding: 0; list-style: none; }
+.recent-executions li + li { border-top: 1px solid var(--line); }
+.recent-execution { display: grid; grid-template-columns: 6px minmax(0, 1fr) auto 12px; gap: 13px; align-items: center; padding: 18px 0; color: inherit; }
+.recent-execution:hover strong, .recent-execution:hover .recent-execution-arrow { color: var(--accent); }
+.execution-status-mark { width: 6px; height: 6px; border-radius: 50%; background: var(--weak); }
+.execution-status-mark.ok { background: #42796a; }
+.execution-status-mark.warn { background: #b1833f; }
+.execution-status-mark.error { background: var(--accent); }
+.recent-execution-body { display: grid; gap: 7px; min-width: 0; }
+.recent-execution-body strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; color: var(--text-strong); }
+.recent-execution-body > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--muted); }
+.recent-execution-body > span > span { padding: 0 4px; color: var(--weak); }
+.recent-execution-end { display: grid; justify-items: end; gap: 7px; white-space: nowrap; }
+.recent-execution-end time { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.execution-state { font-size: 10px; color: var(--muted); }
+.execution-state.ok { color: #42796a; }
+.execution-state.error { color: var(--accent); }
+.recent-execution-arrow { color: var(--weak); font-size: 13px; }
+.attention-count { font-size: 11px; font-weight: 500; color: var(--accent); margin-left: 6px; }
+.attention-list li + li { border-top: 1px solid var(--line); }
+.attention-list a { display: grid; gap: 8px; padding: 18px 0; color: inherit; }
+.attention-list li:first-child a { padding-top: 2px; }
+.attention-list strong { color: var(--text-strong); font-size: 13px; font-weight: 500; }
+.attention-list p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.attention-kind { color: var(--muted); font-size: 10px; }
+.attention-kind.error { color: var(--accent); }
+.attention-kind.warn { color: #9c7535; }
+.attention-action { margin-top: 2px; color: var(--text-strong); font-size: 11px; }
+.attention-clear { display: grid; justify-items: start; gap: 12px; padding: 15px 0; }
+.attention-check { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: #42796a; }
+.attention-clear strong { font-size: 13px; color: var(--text-strong); font-weight: 500; }
+.attention-clear p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.overview-empty { display: grid; gap: 10px; padding: 35px 10px; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.overview-empty p { margin: 0; }
+.overview-empty strong { color: var(--text-strong); font-weight: 500; }
+.overview-empty a { justify-self: start; color: var(--text-strong); }
+.overview-empty.compact { padding: 16px 0; }
+.overview-conversation-table th, .overview-conversation-table td { font-size: 12px; }
+.overview-conversation-table th:last-child, .overview-conversation-table td:last-child { text-align: right; }
+.overview-conversation-table code { font-size: 11px; overflow-wrap: anywhere; }
+.overview-system { padding: 18px 24px; }
+.overview-system > summary { display: flex; align-items: center; gap: 18px; cursor: pointer; color: var(--text-strong); font-size: 12px; font-weight: 500; }
+.overview-system > summary::after { content: '+'; margin-left: auto; color: var(--muted); }
+.overview-system[open] > summary::after { content: '−'; }
+.overview-system > summary small { font-size: 11px; font-weight: 400; color: var(--muted); }
+.overview-system-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 28px; margin: 24px 0 4px; }
+.overview-system-grid > div { min-width: 0; }
+.overview-system-grid dt { margin-bottom: 7px; color: var(--muted); font-size: 11px; }
+.overview-system-grid dd { margin: 0; color: var(--text-strong); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.overview-system-grid code { font-size: 10px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 1120px) { .overview-workbench { grid-template-columns: minmax(0, 1.5fr) minmax(250px, 1fr); } .chain-stage { padding-right: 15px; padding-left: 15px; } }
+@media (max-width: 900px) { .overview-workbench { grid-template-columns: 1fr; } .attention-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; } .attention-list li:nth-child(2) { border-top: 0; } .attention-list li:nth-child(2) a { padding-top: 2px; } .overview-system-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) { .overview-page { gap: 16px; } .overview-chain, .overview-activity, .overview-attention, .overview-conversations { padding: 18px; } .chain-stages { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 0; } .chain-stage:nth-child(3) { border-left: 0; padding-left: 4px; } .chain-stage:nth-child(2) .chain-arrow { display: none; } .chain-stage-value { font-size: 32px; } .chain-footnote { gap: 10px; } .chain-footnote > a { margin-left: 0; width: 100%; } .attention-list { display: block; } .attention-list li:nth-child(2) { border-top: 1px solid var(--line); } .attention-list li:nth-child(2) a { padding-top: 18px; } .recent-execution { gap: 9px; grid-template-columns: 5px minmax(0, 1fr) auto; } .recent-execution-arrow { display: none; } .recent-execution-body strong { font-size: 12px; } .overview-system-grid { grid-template-columns: 1fr; } .overview-system > summary small { display: none; } .overview-status-copy { gap: 8px; font-size: 10px; } }
 </style>

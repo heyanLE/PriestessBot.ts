@@ -18,6 +18,7 @@ object ConversationsTable : Table("conversations") {
     val id = varchar("id", 64)
     val platform = varchar("platform", 32)
     val sessionId = varchar("session_id", 128)
+    val agentId = varchar("agent_id", 128).default("")
     val createdAt = long("created_at")
     val updatedAt = long("updated_at")
 
@@ -70,6 +71,7 @@ object KnowledgeChunksTable : Table("knowledge_chunks") {
  */
 object MemoryRecordsTable : Table("memory_records") {
     val id = varchar("id", 64)
+    val libraryId = varchar("library_id", 128).default("default")
     val workspaceId = varchar("workspace_id", 128)
     val scope = varchar("scope", 32)
     val platformId = varchar("platform_id", 128).nullable()
@@ -99,6 +101,7 @@ object PersonasTable : Table("personas") {
     val tone = text("tone")
     val boundaries = text("boundaries")
     val systemPromptTemplate = text("system_prompt_template")
+    val exampleDialogs = text("example_dialogs").default("[]")
     val enabled = bool("enabled")
     val agentNames = text("agent_names")
     val errorMessages = text("error_messages").default("{}")

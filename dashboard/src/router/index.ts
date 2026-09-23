@@ -1,176 +1,45 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
 import OverviewView from '../views/OverviewView.vue';
-import PlatformView from '../views/PlatformView.vue';
-import ProviderView from '../views/ProviderView.vue';
-import AgentView from '../views/AgentView.vue';
-import SubAgentView from '../views/SubAgentView.vue';
-import ToolView from '../views/ToolView.vue';
-import WorkspaceView from '../views/WorkspaceView.vue';
-import WorkingDirectoryView from '../views/WorkingDirectoryView.vue';
-import EffectiveRuntimeView from '../views/EffectiveRuntimeView.vue';
-import PersonaMemoryView from '../views/PersonaMemoryView.vue';
-import KnowledgeView from '../views/KnowledgeView.vue';
+import ConfigurationV3View from '../views/ConfigurationV3View.vue';
+import PersonaLibraryView from '../views/PersonaLibraryView.vue';
+import ExecutionLogView from '../views/ExecutionLogView.vue';
 import ConversationView from '../views/ConversationView.vue';
 import ConversationDetailView from '../views/ConversationDetailView.vue';
-import PluginView from '../views/PluginView.vue';
 import LogView from '../views/LogView.vue';
-import ConfigView from '../views/ConfigView.vue';
-
+import PluginView from '../views/PluginView.vue';
+const sectionSummaries: Record<string, string> = {
+  system: '管理服务监听、平台目录与消息处理设置。',
+  ims: '连接消息平台，按优先级将消息分配给 Agent 或指令。',
+  llms: '集中管理模型服务的地址和凭据。',
+  agents: '为每个 Agent 选择模型、人格与可用资源。',
+  skills: '管理平台共享的技能库，按需装配给 Agent。',
+  memories: '整理可由多个 Agent 使用的独立记忆库。',
+  mcp: '配置外部 MCP 服务及连接方式。',
+  tools: '管理平台可用工具与权限边界。',
+};
+const configRoute = (path: string, name: string, label: string, section: string, group = '配置'): RouteRecordRaw => ({ path, name, component: ConfigurationV3View, props: { section }, meta: { label, group, summary: sectionSummaries[section] } });
 export const routes: RouteRecordRaw[] = [
-  {
-    path: '/',
-    name: 'overview',
-    component: OverviewView,
-    meta: {
-      label: 'Overview',
-      group: 'Overview',
-      summary: 'Operator workbench for runtime health, incidents, and recovery.',
-    },
-  },
-  {
-    path: '/conversations',
-    name: 'conversations',
-    component: ConversationView,
-    meta: {
-      label: 'Conversations',
-      group: 'Troubleshooting',
-      summary: 'Inspect traffic, session history, and execution context.',
-    },
-  },
-  {
-    path: '/logs',
-    name: 'logs',
-    component: LogView,
-    meta: {
-      label: 'Logs',
-      group: 'Troubleshooting',
-      summary: 'Follow live runtime events, warnings, and execution traces.',
-    },
-  },
-  {
-    path: '/config',
-    name: 'config',
-    component: ConfigView,
-    meta: {
-      label: 'Config',
-      group: 'Changes',
-      summary: 'Review persisted configuration and apply controlled updates.',
-    },
-  },
-  {
-    path: '/agent',
-    name: 'agent',
-    component: AgentView,
-    meta: {
-      label: 'Agent',
-      group: 'Changes',
-      summary: 'Tune the primary agent and validate behavior in one place.',
-    },
-  },
-  {
-    path: '/providers',
-    name: 'providers',
-    component: ProviderView,
-    meta: {
-      label: 'Providers',
-      group: 'Assets',
-      summary: 'Browse provider inventory, health, and capabilities.',
-    },
-  },
-  {
-    path: '/sub-agents',
-    name: 'sub-agents',
-    component: SubAgentView,
-    meta: {
-      label: 'Sub-Agents',
-      group: 'Changes',
-      summary: 'Edit delegation routes and orchestration rules.',
-    },
-  },
-  {
-    path: '/tools',
-    name: 'tools',
-    component: ToolView,
-    meta: {
-      label: 'Tools',
-      group: 'Assets',
-      summary: 'Inspect the tool registry, policy posture, and exposure.',
-    },
-  },
-  {
-    path: '/platforms',
-    name: 'platforms',
-    component: PlatformView,
-    meta: {
-      label: 'Platforms',
-      group: 'Assets',
-      summary: 'Review platform endpoints, state, and runtime entry points.',
-    },
-  },
-  {
-    path: '/plugins',
-    name: 'plugins',
-    component: PluginView,
-    meta: {
-      label: 'Plugins',
-      group: 'Assets',
-      summary: 'Manage plugin lifecycle, extension state, and discovery.',
-    },
-  },
-  {
-    path: '/persona-memory',
-    name: 'persona-memory',
-    component: PersonaMemoryView,
-    meta: {
-      label: 'Persona & Memory',
-      group: 'Assets',
-      summary: 'Control persona overlays, memory records, and injection.',
-    },
-  },
-  {
-    path: '/knowledge',
-    name: 'knowledge',
-    component: KnowledgeView,
-    meta: {
-      label: 'Knowledge',
-      group: 'Assets',
-      summary: 'Manage knowledge bases, retrieval quality, and source tests.',
-    },
-  },
-  {
-    path: '/working-directory',
-    name: 'working-directory',
-    component: WorkingDirectoryView,
-    meta: {
-      label: 'Working Directory',
-      group: 'Changes',
-      summary: 'Control workspace selection, local overlays, and discovery.',
-    },
-  },
-  {
-    path: '/effective-runtime',
-    name: 'effective-runtime',
-    component: EffectiveRuntimeView,
-    meta: {
-      label: 'Effective Runtime',
-      group: 'Changes',
-      summary: 'Trace the layered runtime configuration from result to source.',
-    },
-  },
-  {
-    path: '/workspaces',
-    name: 'workspaces',
-    component: WorkspaceView,
-    meta: {
-      label: 'Workspaces',
-      group: 'Changes',
-      summary: 'Review workspace snapshots, reload plans, and diagnostics.',
-    },
-  },
-  { path: '/conversations/:id', name: 'conversation-detail', component: ConversationDetailView, meta: { label: 'Conversation', nav: false } },
+  { path: '/', name: 'overview', component: OverviewView, meta: { label: '概览', group: '首页', summary: '集中查看运行健康状态、连接与资源。' } },
+  configRoute('/config', 'config', '系统设置', 'system'),
+  configRoute('/ims', 'ims', 'IM 与路由', 'ims'),
+  configRoute('/llms', 'llms', 'LLM 连接', 'llms'),
+  configRoute('/agents', 'agents', 'Agent', 'agents'),
+  configRoute('/resources/skills', 'skill-libraries', 'Skill 库', 'skills', '平台资源'),
+  configRoute('/resources/memories', 'memory-libraries', '记忆库', 'memories', '平台资源'),
+  configRoute('/resources/mcp', 'mcp-servers', 'MCP 服务', 'mcp', '平台资源'),
+  configRoute('/resources/tools', 'tools', '工具', 'tools', '平台资源'),
+  { path: '/resources/personas', name: 'personas', component: PersonaLibraryView, meta: { label: '人格库', group: '平台资源', summary: '管理可由 Agent 单选装配的人格预设。' } },
+  { path: '/conversations', name: 'conversations', component: ConversationView, meta: { label: '会话', group: '运行管理', summary: '检查消息流量与会话历史。' } },
+  { path: '/conversations/:id', name: 'conversation-detail', component: ConversationDetailView, meta: { label: '会话详情', group: '运行管理', nav: false } },
+  { path: '/logs/system', name: 'logs', component: LogView, meta: { label: '系统日志', group: '日志', summary: '查看服务运行事件、警告与错误。' } },
+  { path: '/logs/executions', name: 'executions', component: ExecutionLogView, meta: { label: 'LLM 执行链', group: '日志', summary: '跟踪 IM、Agent、模型与工具的完整执行过程。' } },
+  { path: '/plugins', name: 'plugins', component: PluginView, meta: { label: '插件', group: '兼容管理', nav: false } },
+  { path: '/platforms', redirect: '/ims' }, { path: '/providers', redirect: '/llms' },
+  { path: '/tools', redirect: '/resources/tools' }, { path: '/persona-memory', redirect: '/resources/personas' },
+  { path: '/logs', redirect: '/logs/system' }, { path: '/workspaces', redirect: '/agents' },
+  { path: '/working-directory', redirect: '/config' }, { path: '/sub-agents', redirect: '/agents' },
+  { path: '/agent', redirect: '/agents' }, { path: '/effective-runtime', redirect: '/config' },
+  { path: '/knowledge', redirect: '/resources/memories' },
+  { path: '/:pathMatch(.*)*', redirect: '/' },
 ];
-
-export default createRouter({
-  history: createWebHistory(),
-  routes,
-});
+export default createRouter({ history: createWebHistory(), routes });

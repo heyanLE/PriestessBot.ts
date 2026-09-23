@@ -2,9 +2,11 @@ package com.heyanle.priestess.bot.pipeline
 
 import com.heyanle.priestess.bot.agent.AgentContext
 import com.heyanle.priestess.bot.agent.AgentResponse
+import com.heyanle.priestess.bot.config.model.ConfigurationTrace
+import com.heyanle.priestess.bot.config.model.EffectiveRuntimeSnapshot
+import com.heyanle.priestess.bot.config.model.EffectiveWorkspaceSnapshot
+import com.heyanle.priestess.bot.config.runtime.EffectiveConfigLease
 import com.heyanle.priestess.bot.platform.MessageEvent
-import com.heyanle.priestess.bot.workspace.WorkspaceResolution
-import com.heyanle.priestess.bot.workspace.WorkspaceSnapshot
 
 /**
  * Pipeline 上下文，贯穿所有阶段，携带：
@@ -28,42 +30,78 @@ class PipelineContext(
     /** 装饰后的响应文本，由 ResultDecorateStage 填充 */
     var decoratedResponse: String? = null
 
+    /** Unified response assembled for final delivery, including attachment-only captions. */
+    var responseChain: com.heyanle.priestess.bot.platform.MessageChain? = null
+
     var directResponse: String? = null
 
     var permissionGroup: PermissionGroup = PermissionGroup.OPERATOR
+    var imRoute: com.heyanle.priestess.bot.im.ImRouteMatch? = null
+    var selectedAgentId: String? = null
+    var executionTrace: com.heyanle.priestess.bot.observability.trace.ExecutionTraceRecorder? = null
 
-    private var workspace: WorkspaceResolution? = null
+    val agentProfile: com.heyanle.priestess.bot.config.model.AgentProfileDocument?
+        get() = effectiveRuntimeSnapshot?.application?.agents?.find { it.id == selectedAgentId && it.enabled }
 
-    val workspaceSnapshot: WorkspaceSnapshot?
-        get() = workspace?.snapshot
+    private var effectiveConfigLease: EffectiveConfigLease? = null
 
-    val workspaceResolution: WorkspaceResolution?
-        get() = workspace
+    var effectiveWorkspaceSnapshot: EffectiveWorkspaceSnapshot? = null
+        private set
 
-    val workspaceId: String?
-        get() = workspace?.snapshot?.id
+    var effectiveWorkspaceResolutionReason: String? = null
+        private set
 
-    val workspaceSnapshotVersion: Long?
-        get() = workspace?.snapshot?.version
+    var effectiveWorkspaceRuleId: String? = null
+        private set
 
-    val workspaceRootDir: String?
-        get() = workspace?.snapshot?.rootDir
+    var configurationTrace: ConfigurationTrace? = null
+        internal set
 
-    val workspaceResolutionReason: String?
-        get() = workspace?.reason
+    val effectiveRuntimeSnapshot: EffectiveRuntimeSnapshot?
+        get() = effectiveConfigLease?.snapshot
 
     /** 是否应终止管道（由各阶段设置） */
     val isStopped: Boolean
         get() = event.isStopped.get()
 
-    fun pinWorkspace(resolution: WorkspaceResolution) {
-        workspace?.lease?.close()
-        workspace = resolution
+    fun pinConfiguration(lease: EffectiveConfigLease) {
+        check(effectiveConfigLease == null) { "An effective configuration generation is already pinned" }
+        effectiveConfigLease = lease
+        val snapshot = lease.snapshot
+        configurationTrace = ConfigurationTrace(
+            effectiveVersion = snapshot.version.value,
+            desiredRevision = snapshot.desiredRevision.value,
+            sourceFingerprint = snapshot.sourceFingerprint.value,
+        )
     }
 
-    fun releaseWorkspace() {
-        workspace?.lease?.close()
-        workspace = null
+    fun pinEffectiveWorkspace(
+        snapshot: EffectiveWorkspaceSnapshot,
+        reason: String,
+        ruleId: String? = null,
+    ) {
+        val runtime = checkNotNull(effectiveRuntimeSnapshot) { "Pin effective configuration before selecting a Workspace" }
+        require(snapshot.version == runtime.version) {
+            "Workspace generation ${snapshot.version.value} does not belong to runtime generation ${runtime.version.value}"
+        }
+        effectiveWorkspaceSnapshot = snapshot
+        effectiveWorkspaceResolutionReason = reason
+        effectiveWorkspaceRuleId = ruleId
+        configurationTrace = checkNotNull(configurationTrace).copy(
+            workspaceId = snapshot.config.id,
+            workspaceVersion = snapshot.version.value,
+            workspaceFingerprint = snapshot.fingerprint.value,
+            workspaceSelectionReason = reason,
+            workspaceSelectionRuleId = ruleId,
+        )
+    }
+
+    fun releaseConfiguration() {
+        effectiveWorkspaceSnapshot = null
+        effectiveWorkspaceResolutionReason = null
+        effectiveWorkspaceRuleId = null
+        effectiveConfigLease?.close()
+        effectiveConfigLease = null
     }
 
     fun stop() {
@@ -76,6 +114,11 @@ class PipelineContext(
     /** 便捷：获取事件文本内容 */
     val textContent: String
         get() = event.chain.textContent
+
+    /** The exact user input passed to the model and persisted for correctly attributed history. */
+    val modelUserContent: String by lazy(LazyThreadSafetyMode.NONE) {
+        com.heyanle.priestess.bot.message.InboundMessageFormatter.format(event, permissionGroup.name, selectedAgentId)
+    }
 
     /** 便捷：获取发送者 ID（从 session metadata 中提取，fallback 为 session id） */
     val senderId: String

@@ -8,6 +8,15 @@ data class PersonaErrorMessages(
 )
 
 /**
+ * 一组人设示例对话。运行时会按 user、assistant 的顺序作为 few-shot 消息注入。
+ */
+@Serializable
+data class PersonaExampleDialog(
+    val user: String,
+    val assistant: String,
+)
+
+/**
  * 人设档案，描述智能体在指定工作区中的表达风格和行为边界。
  */
 @Serializable
@@ -19,6 +28,7 @@ data class Persona(
     val tone: String = "",
     val boundaries: List<String> = emptyList(),
     val systemPromptTemplate: String = "",
+    val exampleDialogs: List<PersonaExampleDialog> = emptyList(),
     val enabled: Boolean = true,
     val agentNames: List<String> = emptyList(),
     val errorMessages: PersonaErrorMessages = PersonaErrorMessages(),
@@ -38,6 +48,7 @@ data class PersonaUpsertRequest(
     val tone: String = "",
     val boundaries: List<String> = emptyList(),
     val systemPromptTemplate: String = "",
+    val exampleDialogs: List<PersonaExampleDialog> = emptyList(),
     val enabled: Boolean = true,
     val agentNames: List<String> = emptyList(),
     val errorMessages: PersonaErrorMessages = PersonaErrorMessages(),

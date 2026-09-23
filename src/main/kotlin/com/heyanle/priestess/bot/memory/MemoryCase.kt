@@ -14,6 +14,7 @@ class MemoryCase(
         tags: List<String> = emptyList(),
         confidence: Double = 1.0,
         expiresAt: Long? = null,
+        libraryId: String = "default",
     ): MemoryRecord {
         return controller.save(
             content = content,
@@ -23,6 +24,7 @@ class MemoryCase(
             tags = tags,
             confidence = confidence,
             expiresAt = expiresAt,
+            libraryId = libraryId,
         )
     }
 
@@ -33,4 +35,6 @@ class MemoryCase(
     fun delete(id: String, scopeContext: MemoryScopeContext): Boolean = controller.delete(id, scopeContext)
 
     fun expire(nowMillis: Long = System.currentTimeMillis()): Int = controller.expire(nowMillis)
+    fun listLibrary(libraryId: String, query: String = "", limit: Int = 100, offset: Long = 0): List<MemoryRecord> = controller.listLibrary(libraryId, query, limit, offset)
+    fun deleteLibraryRecord(libraryId: String, id: String): Boolean = controller.deleteLibraryRecord(libraryId, id)
 }

@@ -29,6 +29,12 @@ class PersonaMemoryInjectorTest {
                 tone = "concise",
                 boundaries = listOf("Do not invent APIs"),
                 systemPromptTemplate = "Prefer precise Kotlin examples.",
+                exampleDialogs = listOf(
+                    PersonaExampleDialog(
+                        user = "Show a coroutine example",
+                        assistant = "Here is a concise coroutine example with a test.",
+                    ),
+                ),
                 agentNames = listOf("assistant"),
             ),
         )
@@ -76,6 +82,8 @@ class PersonaMemoryInjectorTest {
         assertFalse(injection.instructions.contains("Other session should stay hidden"))
         assertEquals(persona.id, injection.metadata["injected_persona_id"])
         assertEquals(persona.name, injection.metadata["injected_persona_name"])
+        assertEquals(persona.exampleDialogs, injection.exampleDialogs)
+        assertEquals("1", injection.metadata["injected_example_dialog_count"])
         assertEquals(memory.id, injection.metadata["injected_memory_ids"])
         assertContains(injection.metadata.getValue("injected_memory_reasons"), "content term")
     }

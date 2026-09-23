@@ -33,6 +33,11 @@ interface PluginContext {
     fun registerProvider(provider: ChatProvider)
     fun registeredProviders(): List<String>
     fun registerPlatform(metadata: PlatformMetadata, factory: (PlatformConfig?) -> Platform)
+    fun registerPlatform(
+        metadata: PlatformMetadata,
+        toolFactory: () -> List<FunctionTool>,
+        factory: (PlatformConfig?) -> Platform,
+    )
     fun registeredPlatforms(): List<String>
 }
 
@@ -83,8 +88,16 @@ class DefaultPluginContext(
     override fun registeredProviders(): List<String> = providerNames.toList()
 
     override fun registerPlatform(metadata: PlatformMetadata, factory: (PlatformConfig?) -> Platform) {
+        registerPlatform(metadata, { emptyList() }, factory)
+    }
+
+    override fun registerPlatform(
+        metadata: PlatformMetadata,
+        toolFactory: () -> List<FunctionTool>,
+        factory: (PlatformConfig?) -> Platform,
+    ) {
         PlatformRegistry.unregister(metadata.name)
-        PlatformRegistry.registerMeta(metadata, factory)
+        PlatformRegistry.registerMeta(metadata, toolFactory, factory)
         platformNames.add(metadata.name)
         registerExtension("platform", metadata.name)
     }

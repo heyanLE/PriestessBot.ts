@@ -1,32 +1,41 @@
 package com.heyanle.priestess.bot.agent
 
-import com.heyanle.priestess.bot.config.AgentConfig
+import com.heyanle.priestess.bot.config.model.EffectiveAgent
 import com.heyanle.priestess.bot.core.controller.BaseController
 
 /**
  * Agent 控制器，负责将配置转换为运行时 Agent 实例。
  */
 class AgentController : BaseController("AgentController") {
-    fun createAgent(config: AgentConfig): Agent {
-        val compressStrategy = when (config.compressStrategy.lowercase()) {
-            "token_window", "llm_compress" -> CompressStrategy.TOKEN_WINDOW
-            else -> CompressStrategy.ROUND_TRUNCATION
-        }
-
+    fun createAgent(effective: EffectiveAgent): Agent {
+        val definition = effective.definition
+        val compression = definition.context.compression
+        val toolResults = definition.context.toolResults
+        val compressStrategy = CompressStrategy.fromConfigName(compression.strategy)
+            ?: error("Unsupported compiled compression strategy '${compression.strategy}'")
         return Agent(
-            name = config.name,
-            instructions = config.instructions,
-            model = config.model,
-            maxSteps = config.maxSteps,
-            toolTimeoutMs = config.toolTimeoutSeconds * 1000,
+            name = definition.id,
+            instructions = definition.instructions,
+            model = definition.model,
+            preset = definition.preset,
+            providerName = effective.provider.id,
+            temperature = definition.generation.temperature,
+            maxOutputTokens = definition.generation.maxOutputTokens,
+            maxSteps = definition.execution.maxSteps,
+            toolTimeoutMs = definition.execution.toolTimeoutMillis,
             compressStrategy = compressStrategy,
-            maxContextTokens = config.maxTokens,
-            maxContextRounds = config.maxRounds,
-            toolResultInlineTokens = config.toolResultInlineTokens.coerceAtLeast(1),
-            toolResultPreviewTokens = config.toolResultPreviewTokens.coerceIn(1, config.toolResultInlineTokens.coerceAtLeast(1)),
-            toolResultTtlSeconds = config.toolResultTtlSeconds.coerceAtLeast(1),
-            toolResultMaxBytes = config.toolResultMaxBytes.coerceAtLeast(1),
-            toolResultStoreMaxBytes = config.toolResultStoreMaxBytes.coerceAtLeast(config.toolResultMaxBytes.coerceAtLeast(1)),
+            maxContextTokens = compression.maxTokens,
+            maxContextRounds = compression.maxRounds,
+            toolResultInlineTokens = toolResults.inlineTokens,
+            toolResultPreviewTokens = toolResults.previewTokens,
+            toolResultTtlSeconds = toolResults.ttlSeconds,
+            toolResultMaxBytes = toolResults.maxBytes,
+            toolResultStoreMaxBytes = toolResults.storeMaxBytes,
+            effectiveToolIds = effective.toolIds,
+            deniedToolIds = emptySet(),
+            allowedRiskLevels = definition.toolPolicy.allowedRiskLevels.toSet(),
+            minimumToolPermissionGroups = definition.toolPolicy.minimumPermissionGroups,
+            strictPermissionToolFiltering = true,
         )
     }
 }

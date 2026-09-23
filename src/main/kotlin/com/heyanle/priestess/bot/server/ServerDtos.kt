@@ -1,7 +1,5 @@
 package com.heyanle.priestess.bot.server
 
-import com.heyanle.priestess.bot.config.AgentConfig
-import com.heyanle.priestess.bot.config.SubAgentOrchestrationConfig
 import com.heyanle.priestess.bot.knowledge.KnowledgeBase
 import com.heyanle.priestess.bot.knowledge.KnowledgeChunk
 import com.heyanle.priestess.bot.memory.MemoryRecord
@@ -15,6 +13,7 @@ import com.heyanle.priestess.bot.provider.LLMKind
 import com.heyanle.priestess.bot.tool.ToolParameters
 import com.heyanle.priestess.bot.tool.ToolRiskLevel
 import com.heyanle.priestess.bot.tool.ToolSource
+import com.heyanle.priestess.bot.pipeline.PermissionGroup
 import com.heyanle.priestess.bot.workspace.WorkspaceMemoryPolicyConfig
 import com.heyanle.priestess.bot.workspace.WorkspaceReloadPlan
 import com.heyanle.priestess.bot.workspace.WorkspaceReloadResult
@@ -46,6 +45,20 @@ data class PlatformStatusDto(
     val wsPort: Int,
 )
 
+@Serializable
+data class WeixinQrLoginDto(
+    val sessionId: String,
+    val platformId: String,
+    val status: String,
+    val qrImageDataUrl: String? = null,
+    val qrRevision: Int = 1,
+    val expiresAtEpochMillis: Long,
+    val pollAfterMillis: Long = 1_000,
+    val message: String = "",
+    val accountId: String? = null,
+    val platformRunning: Boolean = false,
+)
+
 /**
  * 模型提供者 DTO，供仪表盘展示提供者能力。
  */
@@ -74,6 +87,7 @@ data class ToolDto(
     val defaultEnabled: Boolean = true,
     val effectiveEnabled: Boolean = true,
     val auditLog: Boolean = false,
+    val requiredPermissionGroup: PermissionGroup = PermissionGroup.OPERATOR,
     val statusReason: String? = null,
 )
 
@@ -128,12 +142,12 @@ data class LogEventDto(
 @Serializable
 data class AgentChatRequest(
     val message: String,
-    val config: AgentConfig? = null,
     val conversationId: String? = null,
     val workspaceId: String = "default",
     val platformId: String? = null,
     val sessionId: String? = null,
     val userId: String? = null,
+    val agentId: String? = null,
 )
 
 /**
@@ -162,6 +176,12 @@ data class AgentChatResponse(
     val model: String,
     val conversationId: String,
     val injectionTrace: AgentChatInjectionTraceDto = AgentChatInjectionTraceDto(),
+    val selectedAgentName: String? = null,
+    val selectedRouteName: String? = null,
+    val selectionReason: String? = null,
+    val runtimeVersion: Long? = null,
+    val workspaceVersion: Long? = null,
+    val toolIds: List<String> = emptyList(),
 )
 
 /**
@@ -240,8 +260,11 @@ data class KnowledgeBaseListResponse(
 @Serializable
 data class SubAgentTestRequest(
     val message: String,
-    val config: SubAgentOrchestrationConfig? = null,
     val conversationId: String? = null,
+    val workspaceId: String = "default",
+    val platformId: String? = null,
+    val sessionId: String? = null,
+    val userId: String? = null,
 )
 
 /**
@@ -256,6 +279,11 @@ data class SubAgentTestResponse(
     val selectionReason: String,
     val events: List<AgentChatEventDto>,
     val conversationId: String,
+    val providerName: String? = null,
+    val model: String? = null,
+    val runtimeVersion: Long? = null,
+    val workspaceVersion: Long? = null,
+    val toolIds: List<String> = emptyList(),
 )
 
 /**
@@ -339,6 +367,7 @@ data class PersonaUpsertDto(
     val tone: String = "",
     val boundaries: List<String> = emptyList(),
     val systemPromptTemplate: String = "",
+    val exampleDialogs: List<com.heyanle.priestess.bot.persona.PersonaExampleDialog> = emptyList(),
     val enabled: Boolean = true,
     val agentNames: List<String> = emptyList(),
     val errorMessages: com.heyanle.priestess.bot.persona.PersonaErrorMessages = com.heyanle.priestess.bot.persona.PersonaErrorMessages(),
@@ -427,48 +456,6 @@ data class ExpireMemoryResponse(
     val expired: Int,
 )
 
-// ─── Config Layers ───
-
-/**
- * 数据库配置层响应，包含当前生效配置和修订信息。
- */
-@Serializable
-data class DatabaseConfigLayerResponse(
-    val config: com.heyanle.priestess.bot.config.PriestessConfig,
-    val revision: PersistedConfigRevisionDto? = null,
-    val diagnostics: List<String> = emptyList(),
-)
-
-/**
- * 持久化配置修订 DTO。
- */
-@Serializable
-data class PersistedConfigRevisionDto(
-    val revision: Long,
-    val savedAt: Long,
-    val source: String,
-)
-
-/**
- * 环境变量覆盖摘要 DTO。
- */
-@Serializable
-data class EnvironmentOverrideSummaryDto(
-    val path: String,
-    val envKey: String,
-    val summary: String,
-    val sensitive: Boolean = false,
-)
-
-/**
- * 环境变量覆盖汇总响应。
- */
-@Serializable
-data class EnvironmentOverrideSummaryResponse(
-    val overrides: List<EnvironmentOverrideSummaryDto>,
-    val diagnostics: List<String> = emptyList(),
-)
-
 // ─── Working Directory ───
 
 /**
@@ -510,48 +497,4 @@ data class WorkingDirectorySummaryResponse(
     val diagnostics: List<String> = emptyList(),
     val unsupportedFields: List<String> = emptyList(),
     val lastLoadedAt: Long = 0,
-)
-
-/**
- * 工作目录更新请求。
- */
-@Serializable
-data class WorkingDirectoryUpdateRequest(
-    val path: String,
-)
-
-// ─── Effective Runtime Preview ───
-
-/**
- * 生效运行时预览请求。
- */
-@Serializable
-data class EffectiveRuntimePreviewRequest(
-    val workdirPath: String? = null,
-    val agent: com.heyanle.priestess.bot.config.AgentConfig? = null,
-    val providerName: String? = null,
-    val maxInjectedMemories: Int? = null,
-)
-
-/**
- * 生效值追踪 DTO。
- */
-@Serializable
-data class EffectiveValueTraceDto(
-    val path: String,
-    val summary: String,
-    val source: String,
-    val overriddenBy: String? = null,
-)
-
-/**
- * 生效运行时预览响应。
- */
-@Serializable
-data class EffectiveRuntimePreviewResponse(
-    val config: com.heyanle.priestess.bot.config.PriestessConfig,
-    val workingDirectory: WorkingDirectorySummaryResponse,
-    val memoryPolicy: com.heyanle.priestess.bot.workspace.WorkspaceMemoryPolicyConfig,
-    val trace: List<EffectiveValueTraceDto> = emptyList(),
-    val diagnostics: List<String> = emptyList(),
 )

@@ -3,8 +3,6 @@ services:
     build: .
     container_name: priestessbot
     restart: unless-stopped
-    environment:
-      PRIESTESS_CONFIG_PATH: /app/config/config.json
     ports:
       - "8080:8080"
     volumes:

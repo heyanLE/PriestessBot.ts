@@ -10,7 +10,7 @@ import com.heyanle.priestess.bot.tool.FunctionTool
 /**
  * Agent 执行上下文，承载当前会话消息、平台会话和工作区限定工具。
  */
-data class AgentContext(
+data class AgentContext @JvmOverloads constructor(
     val agent: Agent,
     val conversationId: String,
     val platform: Platform?,
@@ -20,4 +20,6 @@ data class AgentContext(
     val scopedTools: List<FunctionTool> = emptyList(),
     val skillState: PipelineSkillState = PipelineSkillState(),
     val permissionGroup: PermissionGroup = PermissionGroup.OPERATOR,
+    val responseIntent: com.heyanle.priestess.bot.message.ResponseIntent = com.heyanle.priestess.bot.message.ResponseIntent(),
+    val executionTrace: com.heyanle.priestess.bot.observability.trace.ExecutionTraceRecorder? = null,
 )

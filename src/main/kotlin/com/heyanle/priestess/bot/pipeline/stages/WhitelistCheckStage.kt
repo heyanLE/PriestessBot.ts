@@ -22,17 +22,22 @@ class WhitelistCheckStage(
     override val order = StageOrder.WHITELIST_CHECK
 
     override suspend fun process(ctx: PipelineContext): Flow<Unit>? {
-        if (!config.whitelistEnabled) return null
+        if (ctx.effectiveRuntimeSnapshot?.application != null && ctx.event.platform.metadata.name == "dashboard") return null
+        val effective = ctx.effectiveRuntimeSnapshot?.runtime?.pipeline
+        val whitelistEnabled = effective?.whitelistEnabled ?: config.whitelistEnabled
+        val whitelistUsers = effective?.whitelistUsers ?: config.whitelistUsers
+        val whitelistGroups = effective?.whitelistGroups ?: config.whitelistGroups
+        if (!whitelistEnabled) return null
 
         val senderId = ctx.senderId
         val sessionId = ctx.event.session.id
 
         // 检查用户是否在白名单
-        val userWhitelisted = senderId in config.whitelistUsers
+        val userWhitelisted = senderId in whitelistUsers
 
         // 检查群组是否在白名单（仅群聊场景）
         val groupWhitelisted = if (ctx.event.session.type == SessionType.GROUP) {
-            sessionId in config.whitelistGroups
+            sessionId in whitelistGroups
         } else {
             false
         }

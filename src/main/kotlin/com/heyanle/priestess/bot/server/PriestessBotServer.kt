@@ -57,6 +57,12 @@ fun Application.configureDashboardApplication(
     }
     install(WebSockets)
     install(StatusPages) {
+        exception<IllegalArgumentException> { call, cause ->
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to cause.message.orEmpty()))
+        }
+        exception<NoSuchElementException> { call, cause ->
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to cause.message.orEmpty()))
+        }
         exception<Throwable> { call, cause ->
             call.respond(
                 HttpStatusCode.InternalServerError,
@@ -72,6 +78,7 @@ fun Application.configureDashboardApplication(
             allowMethod(io.ktor.http.HttpMethod.Get)
             allowMethod(io.ktor.http.HttpMethod.Post)
             allowMethod(io.ktor.http.HttpMethod.Put)
+            allowMethod(io.ktor.http.HttpMethod.Delete)
         }
     }
     installDashboardApiTokenAuth(apiToken)

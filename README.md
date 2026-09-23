@@ -21,8 +21,8 @@
 
 ## 特性
 
-- **多平台接入** — 抽象 IM 平台接口，支持 Telegram、NapCat（QQ），可扩展更多平台
-- **消息管道** — 9 阶段洋葱模型管道，从唤醒检查到回答装饰全链路可控
+- **多平台接入** — 抽象 IM 平台接口，支持 Telegram、NapCat（QQ）和个人微信 iLink，可扩展更多平台
+- **IM 路由** — 每个 IM 实体按顺序匹配路由，命中后交给独立 Agent 或内置指令
 - **Agent 循环** — 内置 ReAct Runner，Thought → Action → Observation 推理循环
 - **LLM Provider 抽象** — 统一接口接入 OpenAI、Ollama 等 LLM 服务
 - **Tool / MCP 体系** — 内置工具 + MCP 协议支持（stdio / SSE / streamable HTTP）
@@ -31,7 +31,11 @@
 
 ## 快速开始
 
-> 一期开发中，敬请期待。
+需要 JDK 21。首次安装且尚无配置文件时，先将 `config.example.json` 复制为 `config.json`。执行 `./gradlew installDist -PbuildDashboard=true` 构建包含 Dashboard 的发行包，再运行 `./run-server.sh`。
+
+配置采用 v3：系统运行参数、IM、LLM 连接、Agent 和资源目录在 `config.json` 中声明；凭据通过环境变量引用。平台人格和记忆数据保存在平台目录下的 `resources.sqlite`，执行链与会话记录保存在系统数据库中。
+
+详见 [Agent、IM 与资源配置](./docs/configuration-v3.md)。v2 开发配置首次启动会直接迁移，不生成备份；旧 Workspace 配置文件会被移除。
 
 ## 路线图
 
@@ -55,6 +59,8 @@
 ## 参考
 
 本项目架构设计参考 [AstrBot](https://github.com/AstrBotDevs/AstrBot)，以 Kotlin 重新实现并优化类型安全、并发模型和可扩展性。
+
+个人微信 iLink 平台支持从 Dashboard 扫码登录；配置、能力边界和运行说明见 [微信 iLink Platform](./docs/2026-07-22/weixin-platform.md)。
 
 ## License
 

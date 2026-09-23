@@ -7,6 +7,7 @@ import com.heyanle.priestess.bot.agent.AgentState
 import com.heyanle.priestess.bot.agent.context.ContextManager
 import com.heyanle.priestess.bot.agent.context.TokenCounter
 import com.heyanle.priestess.bot.provider.model.LLMResponse
+import com.heyanle.priestess.bot.provider.model.ConversationMessage
 import com.heyanle.priestess.bot.provider.model.ToolCall
 import com.heyanle.priestess.bot.pipeline.PermissionGroup
 import com.heyanle.priestess.bot.skill.PipelineSkillState
@@ -23,10 +24,12 @@ import com.heyanle.priestess.bot.tool.ToolPolicy
 import com.heyanle.priestess.bot.tool.ToolPolicyDecision
 import com.heyanle.priestess.bot.tool.ToolPolicyDenialCode
 import com.heyanle.priestess.bot.tool.ToolResult
+import com.heyanle.priestess.bot.tool.ToolResultOverflowStore
 import com.heyanle.priestess.bot.tool.ToolSchema
 import com.heyanle.priestess.bot.tool.builtin.UnloadSkillTool
 import com.heyanle.priestess.bot.tool.builtin.UseSkillTool
 import kotlinx.coroutines.runBlocking
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -35,6 +38,53 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class ReActRunnerTest {
+    @Test
+    fun `response annotations survive separate tool rounds and reset between runs`() = runBlocking {
+        val context = testAgentContext()
+        var invocations = 0
+        val tool = object : FunctionTool() {
+            override val schema = ToolSchema(name = "mark", description = "Mark the final reply")
+            override suspend fun execute(context: com.heyanle.priestess.bot.tool.AgentToolContext, args: Map<String, String>): ToolResult {
+                context.responseIntent.mention(if (invocations++ == 0) "123" else "456")
+                return ToolResult.success("marked")
+            }
+        }
+        val provider = FakeProvider(listOf(
+            LLMResponse(content = "working", toolCalls = listOf(ToolCall("1", "mark", "{}"))),
+            LLMResponse(content = "still working", toolCalls = listOf(ToolCall("2", "mark", "{}"))),
+            LLMResponse(content = "final", finishReason = "stop"),
+        ))
+        val runner = runner(context, provider, listOf(tool))
+        assertEquals(AgentResponse.Final("final"), runner.stepUntilDone())
+        assertEquals(listOf("123", "456"), context.responseIntent.snapshot().mentions)
+        assertTrue(testAgentContext().responseIntent.snapshot().mentions.isEmpty())
+        runner.reset()
+        assertTrue(context.responseIntent.snapshot().mentions.isEmpty())
+    }
+
+    @Test
+    fun `provider receives system then examples history and current user in order`() = runBlocking {
+        val provider = FakeProvider(listOf(LLMResponse(content = "done", finishReason = "stop")))
+        val context = testAgentContext(
+            messages = mutableListOf(
+                ConversationMessage.user("Example user"),
+                ConversationMessage.assistant("Example assistant"),
+                ConversationMessage.user("History user"),
+                ConversationMessage.assistant("History assistant"),
+                ConversationMessage.user("Current user"),
+            ),
+        )
+
+        runner(context, provider).stepUntilDone()
+
+        val messages = provider.requests.single().messages
+        assertEquals(listOf("system", "user", "assistant", "user", "assistant", "user"), messages.map { it.role })
+        assertEquals(
+            listOf("Example user", "Example assistant", "History user", "History assistant", "Current user"),
+            messages.drop(1).map { it.content },
+        )
+    }
+
     @Test
     fun `returns final response when provider does not request tools`() = runBlocking {
         val context = testAgentContext()
@@ -50,6 +100,19 @@ class ReActRunnerTest {
         assertEquals("system", context.messages.first().role)
         assertEquals("assistant", context.messages.last().role)
         assertEquals("done", context.messages.last().content)
+    }
+
+    @Test
+    fun `uses Agent generation settings in every provider request`() = runBlocking {
+        val provider = FakeProvider(listOf(LLMResponse(content = "done", finishReason = "stop")))
+        val context = testAgentContext(
+            agent = testAgent().copy(temperature = 0.2, maxOutputTokens = 1234),
+        )
+
+        runner(context, provider).stepUntilDone()
+
+        assertEquals(0.2, provider.requests.single().temperature)
+        assertEquals(1234, provider.requests.single().maxTokens)
     }
 
     @Test
@@ -76,6 +139,106 @@ class ReActRunnerTest {
     }
 
     @Test
+    fun `materializes oversized registered tool output before the next provider request`() = runBlocking {
+        val root = Files.createTempDirectory("react-registered-overflow-")
+        val store = ToolResultOverflowStore(root)
+        try {
+            val content = "registered-output-".repeat(80)
+            val tool = FakeTool(result = ToolResult.success(content))
+            val provider = FakeProvider(
+                listOf(
+                    LLMResponse(toolCalls = listOf(ToolCall("call-1", "fake_tool", """{"value":"abc"}"""))),
+                    LLMResponse(content = "done", finishReason = "stop"),
+                ),
+            )
+            val context = testAgentContext(
+                agent = testAgent().copy(
+                    toolResultInlineTokens = 10,
+                    toolResultPreviewTokens = 3,
+                ),
+            )
+
+            runner(context, provider, listOf(tool), overflowStore = store).stepUntilDone()
+
+            val observation = context.messages.single { it.role == "tool" }.content.orEmpty()
+            val resultId = requireNotNull(Regex("result_id=([A-Za-z0-9-]+)").find(observation)?.groupValues?.get(1))
+            assertTrue(observation.contains("TOOL_RESULT_OVERFLOW"))
+            assertFalse(observation.contains(content))
+            assertEquals(content, store.read(context.conversationId, resultId)?.content)
+            assertEquals(observation, provider.requests[1].messages.single { it.role == "tool" }.content)
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
+    fun `materializes oversized failure from a scoped MCP-style tool`() = runBlocking {
+        val root = Files.createTempDirectory("react-scoped-overflow-")
+        val store = ToolResultOverflowStore(root)
+        try {
+            val error = "remote MCP failure ".repeat(80)
+            val tool = FakeTool(name = "workspace_mcp_tool", result = ToolResult.error(error, "MCP_FAILURE"))
+            val provider = FakeProvider(
+                listOf(
+                    LLMResponse(toolCalls = listOf(ToolCall("call-1", "workspace_mcp_tool", """{"value":"abc"}"""))),
+                    LLMResponse(content = "handled", finishReason = "stop"),
+                ),
+            )
+            val context = testAgentContext(
+                agent = testAgent().copy(
+                    toolResultInlineTokens = 10,
+                    toolResultPreviewTokens = 3,
+                ),
+                metadata = mapOf("workspaceToolNames" to "workspace_mcp_tool"),
+                scopedTools = listOf(tool),
+            )
+
+            runner(context, provider, overflowStore = store).stepUntilDone()
+
+            val observation = context.messages.single { it.role == "tool" }.content.orEmpty()
+            val resultId = requireNotNull(Regex("result_id=([A-Za-z0-9-]+)").find(observation)?.groupValues?.get(1))
+            assertTrue(observation.contains("status=error"))
+            assertTrue(observation.contains("error_code=MCP_FAILURE"))
+            assertEquals(error, store.read(context.conversationId, resultId)?.content)
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
+    fun `bounds source-truncated output when overflow storage cannot accept it`() = runBlocking {
+        val root = Files.createTempDirectory("react-unavailable-overflow-")
+        val store = ToolResultOverflowStore(root)
+        try {
+            val content = """{"truncated":true,"text":"${"x".repeat(400)}"}"""
+            val tool = FakeTool(result = ToolResult.success(content))
+            val provider = FakeProvider(
+                listOf(
+                    LLMResponse(toolCalls = listOf(ToolCall("call-1", "fake_tool", """{"value":"abc"}"""))),
+                    LLMResponse(content = "done", finishReason = "stop"),
+                ),
+            )
+            val context = testAgentContext(
+                agent = testAgent().copy(
+                    toolResultInlineTokens = 10,
+                    toolResultPreviewTokens = 3,
+                    toolResultMaxBytes = 8,
+                    toolResultStoreMaxBytes = 8,
+                ),
+            )
+
+            runner(context, provider, listOf(tool), overflowStore = store).stepUntilDone()
+
+            val observation = context.messages.single { it.role == "tool" }.content.orEmpty()
+            assertTrue(observation.contains("TOOL_RESULT_OVERFLOW_UNAVAILABLE"))
+            assertTrue(observation.contains("source_truncated=true"))
+            assertFalse(observation.contains(content))
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
     fun `only exposes workspace scoped tools to provider`() = runBlocking {
         val allowedTool = FakeTool(name = "allowed_tool")
         val hiddenTool = FakeTool(name = "hidden_tool")
@@ -93,7 +256,7 @@ class ReActRunnerTest {
     }
 
     @Test
-    fun `operator sees administrator tool warning but not super administrator tool`() = runBlocking {
+    fun `operator does not see administrator or super administrator tools`() = runBlocking {
         val adminTool = FakeTool(
             schema = ToolSchema(
                 name = "admin_tool",
@@ -111,14 +274,15 @@ class ReActRunnerTest {
         val provider = FakeProvider(listOf(LLMResponse(content = "done", finishReason = "stop")))
 
         runner(
-            context = testAgentContext().copy(permissionGroup = PermissionGroup.OPERATOR),
+            context = testAgentContext(
+                agent = testAgent().copy(strictPermissionToolFiltering = true),
+            ).copy(permissionGroup = PermissionGroup.OPERATOR),
             provider = provider,
             tools = listOf(adminTool, superAdminTool),
         ).stepUntilDone()
 
         val exposedTools = provider.requests.single().tools.joinToString()
-        assertTrue(exposedTools.contains("admin_tool"))
-        assertTrue(exposedTools.contains("当前权限不足：需要 ADMIN"))
+        assertFalse(exposedTools.contains("admin_tool"))
         assertFalse(exposedTools.contains("super_admin_tool"))
     }
 
@@ -404,6 +568,7 @@ class ReActRunnerTest {
         tools: List<FunctionTool> = emptyList(),
         toolExecutor: ToolExecutor? = null,
         hooks: AgentHooks? = null,
+        overflowStore: ToolResultOverflowStore = ToolResultOverflowStore(),
     ): ReActRunner {
         val toolController = ToolController()
         tools.forEach(toolController::register)
@@ -415,6 +580,7 @@ class ReActRunnerTest {
                 executorProvider = { toolExecutor ?: ToolExecutor(toolController) },
             ),
             contextManager = ContextManager(TokenCounter()),
+            overflowStore = overflowStore,
             hooks = hooks,
         )
     }

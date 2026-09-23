@@ -3,6 +3,7 @@ package com.heyanle.priestess.bot.pipeline
 import com.heyanle.priestess.bot.platform.MessageEvent
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CompletableDeferred
 
 /**
  * 流水线模块门面，向平台模块提供消息投递能力并承接流水线生命周期。
@@ -21,6 +22,18 @@ class PipelineCase(
                 "session=${event.session.id}, messageId=${event.messageId}"
         }
         return controller.process(event)
+    }
+
+    /** Executes through the identical pinned stage chain used by platform traffic. */
+    suspend fun processAndAwait(event: MessageEvent): PipelineExecutionResult {
+        val result = CompletableDeferred<PipelineExecutionResult>()
+        val job = controller.process(event) { completion -> result.complete(completion) }
+        job.invokeOnCompletion { cause ->
+            if (cause != null && !result.isCompleted) {
+                result.complete(PipelineExecutionResult("ERROR", "", error = cause.message))
+            }
+        }
+        return result.await()
     }
 
     /**

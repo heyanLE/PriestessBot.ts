@@ -30,9 +30,12 @@ class RateLimitStage(
     private val windowMs: Long = 60_000L
 
     override suspend fun process(ctx: PipelineContext): Flow<Unit>? {
-        if (!config.rateLimitEnabled) return null
+        val effective = ctx.effectiveRuntimeSnapshot?.runtime?.pipeline
+        val rateLimitEnabled = effective?.rateLimitEnabled ?: config.rateLimitEnabled
+        val rateLimitPerMinute = effective?.rateLimitPerMinute ?: config.rateLimitPerMinute
+        if (!rateLimitEnabled) return null
 
-        val userId = ctx.senderId
+        val userId = "${ctx.event.platform.metadata.name}:${ctx.senderId}"
         val now = System.currentTimeMillis()
 
         val timestamps = userTimestamps.getOrPut(userId) {
@@ -48,9 +51,9 @@ class RateLimitStage(
             }
 
             // 检查是否超限
-            if (timestamps.size >= config.rateLimitPerMinute) {
+            if (timestamps.size >= rateLimitPerMinute) {
                 ctx.stop()
-                log("User '$userId' exceeded rate limit (${config.rateLimitPerMinute}/min), stopping pipeline")
+                log("User '$userId' exceeded rate limit ($rateLimitPerMinute/min), stopping pipeline")
                 return null
             }
 

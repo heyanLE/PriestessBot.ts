@@ -25,12 +25,14 @@ class WakingCheckStage(
     override val order = StageOrder.WAKING_CHECK
 
     override suspend fun process(ctx: PipelineContext): Flow<Unit>? {
+        if (ctx.effectiveRuntimeSnapshot?.application != null) return null
         // 私聊消息默认通过
         if (ctx.isPrivate) {
             return null
         }
 
         val text = ctx.textContent.trim()
+        val wakingPrefix = ctx.effectiveRuntimeSnapshot?.runtime?.pipeline?.wakingPrefix ?: config.wakingPrefix
 
         // 检查是否 @提及了机器人
         val selfId = ctx.event.session.metadata["selfId"]
@@ -40,7 +42,7 @@ class WakingCheckStage(
             }
 
         // 检查是否有命令前缀
-        val hasPrefix = config.wakingPrefix.isNotEmpty() && text.startsWith(config.wakingPrefix)
+        val hasPrefix = wakingPrefix.isNotEmpty() && text.startsWith(wakingPrefix)
 
         if (!hasBotAtMention && !hasPrefix) {
             ctx.stop()

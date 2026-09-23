@@ -10,6 +10,7 @@ import com.heyanle.priestess.bot.pipeline.PermissionGroup
 data class SkillPromptDocument(
     val name: String,
     val markdown: String,
+    val sourcePath: String? = null,
 )
 
 /**
@@ -43,7 +44,7 @@ data class SkillPromptReference(
                 }
             }.trim()
         }
-        return SkillPromptDocument(name = name, markdown = rendered)
+        return SkillPromptDocument(name = name, markdown = rendered, sourcePath = markdownPath)
     }
 }
 
@@ -68,6 +69,16 @@ class PipelineSkillState(
 
     fun canLoad(name: String): Boolean = requiredPermissionFor(name)?.let(permissionGroup::satisfies) ?: false
 
+    /** Only references authorized by this run's permission are exposed to runtime readers. */
+    fun authorizedReferences(): List<SkillPromptReference> = availableByName.values
+        .filter { permissionGroup.satisfies(it.requiredPermissionGroup) }.sortedBy { it.name }
+
+    fun reference(name: String): SkillPromptReference? = availableByName[name.trim()]
+        ?.takeIf { permissionGroup.satisfies(it.requiredPermissionGroup) }
+
+    /** Read without changing the set of skills injected into subsequent model turns. */
+    fun peek(name: String): SkillPromptDocument? = reference(name)?.loadDocument()
+
     fun load(name: String): SkillPromptDocument? {
         val normalized = name.trim()
         if (!canLoad(normalized)) return null
@@ -86,6 +97,11 @@ class PipelineSkillState(
             append("Loaded SKILL.md documents:")
             loadedByName.values.forEach { document ->
                 append("\n\n---\n")
+                append("Skill: ").append(document.name).append('\n')
+                document.sourcePath?.let {
+                    append("Skill directory: ").append(Path.of(it).parent).append('\n')
+                    append("Resolve this skill's relative resource paths against its directory.\n")
+                }
                 append(document.markdown.trim())
             }
         }

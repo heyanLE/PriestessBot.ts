@@ -18,7 +18,7 @@ class ConversationController(
     private val expirationDuration: Duration = 24.hours,
 ) : BaseController("ConversationController") {
 
-    fun create(platform: String, sessionId: String): Conversation {
+    fun create(platform: String, sessionId: String, agentId: String = ""): Conversation {
         return db.execute {
             val id = UUID.randomUUID().toString()
             val now = System.currentTimeMillis()
@@ -26,6 +26,7 @@ class ConversationController(
                 it[ConversationsTable.id] = id
                 it[ConversationsTable.platform] = platform
                 it[ConversationsTable.sessionId] = sessionId
+                it[ConversationsTable.agentId] = agentId
                 it[createdAt] = now
                 it[updatedAt] = now
             }
@@ -35,23 +36,24 @@ class ConversationController(
                 sessionId = sessionId,
                 createdAt = now,
                 updatedAt = now,
+                agentId = agentId,
             )
         }
     }
 
-    fun findByPlatformSession(platform: String, sessionId: String): Conversation? {
+    fun findByPlatformSession(platform: String, sessionId: String, agentId: String = ""): Conversation? {
         return db.execute {
             ConversationsTable.selectAll()
-                .where { (ConversationsTable.platform eq platform) and (ConversationsTable.sessionId eq sessionId) }
+                .where { (ConversationsTable.platform eq platform) and (ConversationsTable.sessionId eq sessionId) and (ConversationsTable.agentId eq agentId) }
                 .singleOrNull()
                 ?.toConversation()
         }
     }
 
-    fun getOrCreate(platform: String, sessionId: String): Conversation {
+    fun getOrCreate(platform: String, sessionId: String, agentId: String = ""): Conversation {
         return db.execute {
             val existing = ConversationsTable.selectAll()
-                .where { (ConversationsTable.platform eq platform) and (ConversationsTable.sessionId eq sessionId) }
+                .where { (ConversationsTable.platform eq platform) and (ConversationsTable.sessionId eq sessionId) and (ConversationsTable.agentId eq agentId) }
                 .singleOrNull()
             if (existing != null) {
                 return@execute existing.toConversation()
@@ -62,6 +64,7 @@ class ConversationController(
                 it[ConversationsTable.id] = id
                 it[ConversationsTable.platform] = platform
                 it[ConversationsTable.sessionId] = sessionId
+                it[ConversationsTable.agentId] = agentId
                 it[createdAt] = now
                 it[updatedAt] = now
             }
@@ -71,6 +74,7 @@ class ConversationController(
                 sessionId = sessionId,
                 createdAt = now,
                 updatedAt = now,
+                agentId = agentId,
             )
         }
     }
@@ -116,6 +120,7 @@ class ConversationController(
             sessionId = this[ConversationsTable.sessionId],
             createdAt = this[ConversationsTable.createdAt],
             updatedAt = this[ConversationsTable.updatedAt],
+            agentId = this[ConversationsTable.agentId],
         )
     }
 }

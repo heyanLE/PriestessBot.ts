@@ -1,462 +1,194 @@
 <template>
-  <div class="log-command">
-    <section class="panel log-hero">
-      <div class="log-hero-grid">
-        <div class="log-copy">
-          <div class="log-band">
-            <span>Troubleshooting</span>
-            <span>Logs</span>
-          </div>
-
-          <h2>Follow the live event stream.</h2>
-          <p>
-            Track runtime traffic, warnings, and execution faults from one clean event stream. The
-            feed stays clipped to the latest two hundred events so scan speed stays high.
-          </p>
-
-          <div class="grid log-signal-grid">
-            <article v-for="signal in logSignals" :key="signal.label" class="card log-signal" :class="`tone-${signal.tone}`">
-              <span>{{ signal.label }}</span>
-              <strong>{{ signal.value }}</strong>
-              <p>{{ signal.detail }}</p>
-            </article>
-          </div>
+  <div class="v3-page log-page">
+    <section class="panel log-panel" aria-labelledby="log-title">
+      <header class="log-header">
+        <div class="log-heading">
+          <h2 id="log-title">实时日志</h2>
+          <span class="connection-state" :class="{ connected: logStore.connected }" role="status">
+            <span aria-hidden="true"></span>
+            {{ logStore.connected ? '日志流已连接' : '日志流未连接' }}
+          </span>
         </div>
+        <div class="toolbar log-actions">
+          <button type="button" :disabled="logStore.connected" @click="logStore.connect()">连接日志流</button>
+          <button type="button" :disabled="!logStore.events.length" @click="logStore.clear()">清空记录</button>
+        </div>
+      </header>
 
-        <aside class="log-rail">
-          <article class="card log-rail-card">
-            <div class="section-title compact">
-              <div>
-                <h3>Stream posture</h3>
-                <p>{{ connectionSummary }}</p>
-              </div>
-            </div>
+      <p v-if="logStore.error" class="notice error log-error" role="alert">{{ logStore.error }}</p>
 
-            <div class="rail-stack">
-              <div class="rail-item">
-                <span>Socket state</span>
-                <strong>{{ logStore.connected ? 'Connected' : 'Disconnected' }}</strong>
-              </div>
-              <div class="rail-item">
-                <span>Latest marker</span>
-                <strong>{{ latestEvent ? formatTime(latestEvent.timestamp) : 'Awaiting feed' }}</strong>
-              </div>
-              <div class="rail-item">
-                <span>Error posture</span>
-                <strong>{{ latestErrorCount > 0 ? `${latestErrorCount} alert event(s)` : 'No active alerts in buffer' }}</strong>
-              </div>
-            </div>
-          </article>
-        </aside>
+      <div class="log-filters">
+        <div class="level-filters" role="group" aria-label="按日志级别筛选">
+          <button type="button" :class="{ active: selectedLevel === '' }" :aria-pressed="selectedLevel === ''" @click="selectedLevel = ''">
+            全部 <span>{{ logStore.events.length }}</span>
+          </button>
+          <button
+            v-for="level in levels"
+            :key="level.name"
+            type="button"
+            :class="{ active: selectedLevel === level.name }"
+            :aria-pressed="selectedLevel === level.name"
+            @click="selectedLevel = level.name"
+          >
+            {{ formatLevel(level.name) }} <span>{{ level.count }}</span>
+          </button>
+        </div>
+        <input v-model="query" class="log-search" type="search" aria-label="搜索日志内容" placeholder="搜索日志内容" />
       </div>
+
+      <div class="log-table-head" aria-hidden="true">
+        <span>时间</span>
+        <span>级别</span>
+        <span>事件内容 <small>按事件时间，最新在前</small></span>
+      </div>
+      <EmptyState
+        v-if="!logStore.events.length"
+        title="暂无日志记录"
+        :detail="logStore.connected ? '连接已建立。新的运行事件会出现在这里。' : '连接日志流，查看服务运行中的信息、警告与错误。'"
+      />
+      <div v-else-if="!filteredEvents.length" class="log-empty">
+        <h3>没有符合条件的记录</h3>
+        <p>尝试其他级别或搜索内容。</p>
+        <button type="button" @click="resetFilters">清除筛选</button>
+      </div>
+      <ol v-else class="event-stream" aria-label="运行事件，按事件时间从新到旧排列">
+        <li
+          v-for="(event, index) in filteredEvents"
+          :key="`${event.timestamp}-${index}-${event.level}`"
+          class="event-row"
+          :class="`tone-${levelTone(event.level)}`"
+        >
+          <time class="event-time" :title="formatDateTime(event.timestamp)">{{ formatTime(event.timestamp) }}</time>
+          <span class="event-level" :class="levelTone(event.level)">{{ formatLevel(event.level) }}</span>
+          <pre class="event-message">{{ event.message }}</pre>
+        </li>
+      </ol>
+      <footer class="log-footer">
+        <span>显示 {{ filteredEvents.length }} 条，最多保留最近接收的 200 条</span>
+        <span v-if="latestEvent">最新事件 {{ formatTime(latestEvent.timestamp) }}</span>
+        <span v-else>{{ logStore.events.length ? '事件时间不可用' : '等待运行事件' }}</span>
+      </footer>
     </section>
-
-    <div class="workbench-grid wide-detail">
-      <section class="panel ledger-panel">
-        <div class="section-title">
-          <div>
-            <h2>Runtime stream</h2>
-            <p>{{ logStore.connected ? 'Socket linked and accepting live runtime markers.' : 'Connect to receive runtime markers from the backend socket.' }}</p>
-          </div>
-          <div class="toolbar">
-            <button type="button" class="primary" @click="logStore.connect()">Connect</button>
-            <button type="button" @click="logStore.clear()">Clear</button>
-          </div>
-        </div>
-
-        <section v-if="logStore.error" class="notice error">{{ logStore.error }}</section>
-
-        <EmptyState
-          v-if="logStore.events.length === 0"
-          title="No log events"
-          detail="Connect to the log socket to receive runtime events."
-        />
-
-        <div v-else class="log-ledger">
-          <article v-for="event in logStore.events" :key="`${event.timestamp}-${event.level}-${event.message}`" class="log-entry" :class="`tone-${levelTone(event.level)}`">
-            <div class="log-entry-head">
-              <div class="log-entry-main">
-                <span class="inline-status" :class="levelTone(event.level)">
-                  {{ formatLevel(event.level) }}
-                </span>
-                <strong>{{ event.message }}</strong>
-              </div>
-
-              <div class="log-entry-meta">
-                <span>{{ formatTime(event.timestamp) }}</span>
-                <small>{{ formatRelative(event.timestamp) }}</small>
-              </div>
-            </div>
-          </article>
-        </div>
-      </section>
-
-      <aside class="panel detail-panel feed-rail">
-        <div class="section-title">
-          <div>
-            <h2>Level sweep</h2>
-            <p>Recent event distribution across the live buffer.</p>
-          </div>
-        </div>
-
-        <div class="detail-stack">
-          <article class="card log-rail-card">
-            <div class="detail-list">
-              <div v-for="row in levelRows" :key="row.label" class="detail-item">
-                <span>{{ row.label }}</span>
-                <strong>{{ row.value }}</strong>
-              </div>
-            </div>
-          </article>
-
-          <article class="card log-rail-card">
-            <div class="section-title compact">
-              <div>
-                <h3>Latest event</h3>
-                <p>Most recent marker in the local ledger.</p>
-              </div>
-            </div>
-
-            <EmptyState
-              v-if="!latestEvent"
-              title="No latest event"
-              detail="The side rail fills in after the first socket message arrives."
-            />
-
-            <div v-else class="detail-list">
-              <div class="detail-item">
-                <span>Level</span>
-                <strong>{{ formatLevel(latestEvent.level) }}</strong>
-              </div>
-              <div class="detail-item">
-                <span>Timestamp</span>
-                <strong>{{ formatTime(latestEvent.timestamp) }}</strong>
-              </div>
-              <div class="detail-item">
-                <span>Message</span>
-                <strong>{{ latestEvent.message }}</strong>
-              </div>
-            </div>
-          </article>
-        </div>
-      </aside>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import EmptyState from '../components/EmptyState.vue';
 import { useLogStore } from '../stores/logs';
 
 const logStore = useLogStore();
-
-const latestEvent = computed(() => logStore.events[0] ?? null);
-const latestErrorCount = computed(() => logStore.events.filter((event) => levelTone(event.level) === 'danger').length);
-const latestWarnCount = computed(() => logStore.events.filter((event) => levelTone(event.level) === 'warn').length);
-
-const logSignals = computed(() => [
-  {
-    label: 'Buffered',
-    value: String(logStore.events.length),
-    detail: 'Latest runtime events retained in the in-memory ledger.',
-    tone: 'muted',
-  },
-  {
-    label: 'Alerts',
-    value: String(latestErrorCount.value),
-    detail: latestErrorCount.value > 0 ? 'Fault markers need operator review.' : 'No fault markers in the current buffer.',
-    tone: latestErrorCount.value > 0 ? 'danger' : 'ok',
-  },
-  {
-    label: 'Warnings',
-    value: String(latestWarnCount.value),
-    detail: latestWarnCount.value > 0 ? 'Monitor degradations before they escalate.' : 'No warning posture in the current feed.',
-    tone: latestWarnCount.value > 0 ? 'warn' : 'ok',
-  },
-  {
-    label: 'Socket',
-    value: logStore.connected ? 'Linked' : 'Idle',
-    detail: logStore.connected ? 'Live runtime markers are flowing into the ledger.' : 'Reconnect the feed to restore live observation.',
-    tone: logStore.connected ? 'ok' : 'warn',
-  },
-]);
-
-const levelRows = computed(() => [
-  {
-    label: 'Info',
-    value: String(logStore.events.filter((event) => normalizeLevel(event.level) === 'INFO').length),
-  },
-  {
-    label: 'Warn',
-    value: String(logStore.events.filter((event) => normalizeLevel(event.level) === 'WARN').length),
-  },
-  {
-    label: 'Error',
-    value: String(logStore.events.filter((event) => normalizeLevel(event.level) === 'ERROR').length),
-  },
-  {
-    label: 'Other',
-    value: String(
-      logStore.events.filter((event) => !['INFO', 'WARN', 'ERROR'].includes(normalizeLevel(event.level))).length,
-    ),
-  },
-]);
-
-const connectionSummary = computed(() => {
-  if (logStore.connected) {
-    return 'Live socket linked. Keep the ledger clear enough to spot execution drift at a glance.';
+const selectedLevel = ref('');
+const query = ref('');
+const orderedEvents = computed(() => logStore.events
+  .map((event, index) => ({ event, index, timestamp: validTimestamp(event.timestamp) }))
+  .sort((left, right) => {
+    if (left.timestamp === null && right.timestamp === null) return left.index - right.index;
+    if (left.timestamp === null) return 1;
+    if (right.timestamp === null) return -1;
+    return right.timestamp - left.timestamp || left.index - right.index;
+  })
+  .map(({ event }) => event),
+);
+const latestEvent = computed(() => orderedEvents.value.find((event) => validTimestamp(event.timestamp) !== null) ?? null);
+const levels = computed(() => {
+  const counts = new Map<string, number>([['INFO', 0], ['WARN', 0], ['ERROR', 0]]);
+  for (const event of logStore.events) {
+    const level = normalizeLevel(event.level);
+    counts.set(level, (counts.get(level) ?? 0) + 1);
   }
-  return 'Socket is idle. Connect to resume the live runtime watch.';
+  if (selectedLevel.value && !counts.has(selectedLevel.value)) counts.set(selectedLevel.value, 0);
+  return [...counts].map(([name, count]) => ({ name, count }));
+});
+const filteredEvents = computed(() => {
+  const search = query.value.trim().toLowerCase();
+  return orderedEvents.value.filter((event) =>
+    (!selectedLevel.value || normalizeLevel(event.level) === selectedLevel.value)
+    && (!search || String(event.message ?? '').toLowerCase().includes(search)),
+  );
 });
 
 function normalizeLevel(level: string) {
-  return String(level).trim().toUpperCase();
+  const value = String(level).trim().toUpperCase();
+  return value === 'WARNING' ? 'WARN' : value || 'UNKNOWN';
 }
-
 function levelTone(level: string) {
-  const normalized = normalizeLevel(level);
-  if (normalized === 'ERROR') return 'danger';
-  if (normalized === 'WARN' || normalized === 'WARNING') return 'warn';
-  if (normalized === 'INFO') return 'ok';
+  const value = normalizeLevel(level);
+  if (value === 'ERROR' || value === 'FATAL') return 'danger';
+  if (value === 'WARN') return 'warn';
   return 'muted';
 }
-
 function formatLevel(level: string) {
-  return normalizeLevel(level);
+  const value = normalizeLevel(level);
+  const labels: Record<string, string> = { INFO: '信息', WARN: '警告', ERROR: '错误', DEBUG: '调试', TRACE: '跟踪', FATAL: '严重错误', UNKNOWN: '未知' };
+  return labels[value] ?? value;
 }
-
+function validTimestamp(value: unknown): number | null {
+  // The API supplies Unix milliseconds as a number. Malformed events stay visible at the end.
+  return typeof value === 'number' && Number.isFinite(value) && Number.isFinite(new Date(value).getTime())
+    ? value
+    : null;
+}
 function formatTime(value: number) {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(value);
+  const timestamp = validTimestamp(value);
+  return timestamp !== null
+    ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(timestamp)
+    : '未知时间';
 }
-
-function formatRelative(value: number) {
-  const diff = Math.max(0, Date.now() - value);
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 5) return 'just now';
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+function formatDateTime(value: number) {
+  const timestamp = validTimestamp(value);
+  return timestamp !== null ? new Date(timestamp).toLocaleString('zh-CN') : '未知时间';
 }
-
+function resetFilters() {
+  selectedLevel.value = '';
+  query.value = '';
+}
 onMounted(() => logStore.connect());
 </script>
 
 <style scoped>
-.log-command {
-  display: grid;
-  gap: 14px;
-}
-
-.log-hero {
-  border-color: #d7cebd;
-  background:
-    linear-gradient(135deg, rgba(255, 252, 246, 0.98) 0%, rgba(247, 241, 231, 0.98) 55%, rgba(240, 246, 248, 0.98) 100%);
-}
-
-.log-hero-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.18fr) minmax(280px, 0.82fr);
-  gap: 14px;
-}
-
-.log-band {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.log-band span,
-.log-signal span,
-.rail-item span {
-  color: #887152;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.log-band span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 0 10px;
-  border: 1px solid rgba(182, 159, 111, 0.34);
-  background: rgba(255, 251, 245, 0.92);
-}
-
-.log-copy h2 {
-  margin: 0;
-  color: #18304c;
-  font-size: clamp(28px, 2vw + 18px, 40px);
-  line-height: 0.98;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.log-copy > p {
-  margin: 12px 0 0;
-  max-width: 70ch;
-  color: #5b6675;
-  line-height: 1.66;
-}
-
-.log-signal-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin-top: 16px;
-}
-
-.log-signal {
-  display: grid;
-  gap: 8px;
-  border-top: 3px solid #98a2b0;
-  background: rgba(255, 252, 247, 0.9);
-}
-
-.log-signal.tone-ok {
-  border-top-color: #4c8661;
-}
-
-.log-signal.tone-warn {
-  border-top-color: #bb8524;
-}
-
-.log-signal.tone-danger {
-  border-top-color: #c15b50;
-}
-
-.log-signal strong {
-  color: #17304d;
-  font-size: 30px;
-  line-height: 1;
-}
-
-.log-signal p {
-  margin: 0;
-  color: #606a79;
-  font-size: 12px;
-  line-height: 1.58;
-}
-
-.log-rail,
-.detail-stack {
-  display: grid;
-  gap: 12px;
-}
-
-.log-rail-card {
-  border-color: #ddd4c5;
-  background: rgba(255, 252, 246, 0.92);
-}
-
-.rail-stack {
-  display: grid;
-  gap: 10px;
-}
-
-.rail-item {
-  display: grid;
-  gap: 4px;
-  padding: 12px;
-  border: 1px solid #e3dacb;
-  background: rgba(255, 251, 245, 0.92);
-}
-
-.rail-item strong {
-  color: #19314d;
-  font-size: 14px;
-  line-height: 1.46;
-}
-
-.ledger-panel,
-.feed-rail {
-  border-color: #ddd3c3;
-  background: linear-gradient(180deg, rgba(255, 252, 247, 0.96) 0%, rgba(248, 243, 234, 0.94) 100%);
-}
-
-.log-ledger {
-  display: grid;
-  gap: 10px;
-}
-
-.log-entry {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid #e2d8ca;
-  border-left-width: 4px;
-  background: rgba(255, 252, 247, 0.92);
-}
-
-.log-entry.tone-ok {
-  border-left-color: #4c8661;
-}
-
-.log-entry.tone-warn {
-  border-left-color: #bb8524;
-}
-
-.log-entry.tone-danger {
-  border-left-color: #c15b50;
-}
-
-.log-entry.tone-muted {
-  border-left-color: #98a2b0;
-}
-
-.log-entry-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.log-entry-main {
-  display: grid;
-  gap: 8px;
-}
-
-.log-entry-main strong {
-  color: #182f4b;
-  line-height: 1.55;
-}
-
-.log-entry-meta {
-  display: grid;
-  gap: 4px;
-  justify-items: end;
-  color: #6e7784;
-  font-size: 12px;
-  text-align: right;
-}
-
-@media (max-width: 1180px) {
-  .log-hero-grid,
-  .workbench-grid.wide-detail {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 900px) {
-  .log-signal-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .log-entry-head {
-    flex-direction: column;
-  }
-
-  .log-entry-meta {
-    justify-items: start;
-    text-align: left;
-  }
+.log-panel { padding: 0; overflow: hidden; }
+.log-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 22px 24px 18px; }
+.log-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
+.log-heading h2 { margin: 0; font-size: 22px; }
+.connection-state { display: inline-flex; align-items: center; gap: 7px; color: var(--muted, #63758a); font-size: 12px; }
+.connection-state > span { width: 6px; height: 6px; border-radius: 50%; background: var(--weak); }
+.connection-state.connected > span { background: #377969; }
+.log-actions { gap: 8px; }
+.log-error { margin: 0 24px 16px; }
+.log-filters { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; padding: 0 24px 18px; }
+.level-filters { display: flex; flex-wrap: wrap; gap: 4px; }
+.level-filters button { display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 6px 10px; border: 1px solid transparent; background: transparent; font-size: 13px; font-weight: 500; }
+.level-filters button span { color: var(--muted, #63758a); font-size: 12px; font-variant-numeric: tabular-nums; }
+.level-filters button.active { color: var(--accent-ink); background: var(--accent-soft); border-color: var(--line-strong); }
+.log-search { width: min(100%, 260px); min-height: 36px; }
+.log-table-head, .event-row { display: grid; grid-template-columns: 86px 78px minmax(0, 1fr); column-gap: 12px; }
+.log-table-head { padding: 10px 24px; border-block: 1px solid var(--line, #dae3ec); background: var(--surface-soft); color: var(--muted, #63758a); font-size: 12px; }
+.log-table-head small { margin-left: 8px; font-weight: 400; font-size: 11px; }
+.event-stream { list-style: none; margin: 0; padding: 0; max-height: min(70vh, 780px); overflow: auto; }
+.event-row { align-items: start; padding: 14px 24px; border-bottom: 1px solid var(--line); }
+.event-row:last-child { border-bottom: 0; }
+.event-row.tone-danger { background: #fff8f7; }
+.event-time { padding-top: 2px; color: var(--muted, #63758a); font-size: 12px; font-variant-numeric: tabular-nums; }
+.event-level { justify-self: start; padding: 2px 7px; border-radius: 4px; background: var(--surface-soft); color: var(--muted); font-size: 11px; line-height: 1.6; }
+.event-level.warn { color: #855e17; background: #fbf1d9; }
+.event-level.danger { color: #a43f39; background: #f8e2df; }
+.event-message { margin: 0; color: var(--ink, #172c42); font: inherit; font-size: 13px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 12px 24px; border-top: 1px solid var(--line, #dae3ec); color: var(--muted, #63758a); font-size: 12px; }
+.log-empty { padding: 52px 24px; text-align: center; }
+.log-empty h3 { margin: 0 0 8px; font-size: 16px; }
+.log-empty p { color: var(--muted, #63758a); font-size: 13px; }
+@media (max-width: 640px) {
+  .log-header { padding: 18px 16px 14px; align-items: flex-start; }
+  .log-heading { display: grid; gap: 8px; }
+  .log-actions { width: auto; }
+  .log-actions > button { flex: 0 1 auto; }
+  .log-filters { padding: 0 16px 14px; gap: 12px; }
+  .log-search { width: 100%; }
+  .log-error { margin-inline: 16px; }
+  .log-table-head { display: none; }
+  .event-row { grid-template-columns: 76px minmax(0, 1fr); gap: 8px 12px; padding: 14px 16px; }
+  .event-message { grid-column: 1 / -1; }
+  .log-footer { padding: 12px 16px; }
 }
 </style>

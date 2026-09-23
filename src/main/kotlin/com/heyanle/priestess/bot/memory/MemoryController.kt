@@ -8,9 +8,11 @@ import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
+import org.jetbrains.exposed.sql.lowerCase
 import java.util.UUID
 
 /**
@@ -32,10 +34,16 @@ class MemoryController(
         tags: List<String> = emptyList(),
         confidence: Double = 1.0,
         expiresAt: Long? = null,
+        libraryId: String = "default",
     ): MemoryRecord {
         val normalizedContent = content.trim()
         require(normalizedContent.isNotBlank()) { "Memory content must not be blank" }
         validateScope(scope, scopeContext)
+        require(scopeContext.allowedScopes == null || scope in scopeContext.allowedScopes) { "Memory scope is not allowed for this context" }
+        val normalizedLibrary = libraryId.trim()
+        require(normalizedLibrary.isNotBlank() && normalizedLibrary.length <= 128) { "Memory library id must contain 1-128 characters" }
+        require(scopeContext.libraryIds == null || normalizedLibrary in scopeContext.libraryIds) { "Memory library is not selected for this context" }
+        require(confidence.isFinite()) { "Memory confidence must be finite" }
         val normalizedTags = tags.map { it.trim() }.filter { it.isNotBlank() }.distinct()
         val now = System.currentTimeMillis()
         val record = MemoryRecord(
@@ -53,12 +61,14 @@ class MemoryController(
             createdAt = now,
             updatedAt = now,
             expiresAt = expiresAt,
+            libraryId = normalizedLibrary,
         )
 
         return db.execute {
             MemoryRecordsTable.insert {
                 it[id] = record.id
                 it[workspaceId] = record.workspaceId
+                it[MemoryRecordsTable.libraryId] = record.libraryId
                 it[MemoryRecordsTable.scope] = record.scope.name
                 it[platformId] = record.platformId
                 it[sessionId] = record.sessionId
@@ -79,11 +89,17 @@ class MemoryController(
 
     fun list(filter: MemoryFilter): List<MemoryRecord> {
         val limit = filter.limit.coerceIn(1, 100)
+        return visibleRecords(filter).take(limit)
+    }
+
+    private fun visibleRecords(filter: MemoryFilter): List<MemoryRecord> {
+        if (filter.scopeContext.libraryIds?.isEmpty() == true) return emptyList()
         val normalizedTag = filter.tag?.trim()?.takeIf { it.isNotBlank() }
         return db.execute {
             MemoryRecordsTable.selectAll()
                 .where { MemoryRecordsTable.workspaceId eq filter.scopeContext.workspaceId }
-                .orderBy(MemoryRecordsTable.updatedAt, SortOrder.DESC)
+                .apply { filter.scopeContext.libraryIds?.let { ids -> andWhere { MemoryRecordsTable.libraryId inList ids } } }
+                .orderBy(MemoryRecordsTable.updatedAt to SortOrder.DESC, MemoryRecordsTable.id to SortOrder.ASC)
                 .map { it.toMemoryRecord() }
                 .asSequence()
                 .filter { filter.includeDeleted || it.deletedAt == null }
@@ -91,7 +107,6 @@ class MemoryController(
                 .filter { it.isVisibleTo(filter.scopeContext) }
                 .filter { filter.type == null || it.type == filter.type }
                 .filter { normalizedTag == null || it.tags.any { tag -> tag.equals(normalizedTag, ignoreCase = true) } }
-                .take(limit)
                 .toList()
         }
     }
@@ -99,7 +114,7 @@ class MemoryController(
     fun search(searchQuery: MemorySearchQuery): List<MemorySearchResult> {
         val limit = searchQuery.limit.coerceIn(1, 20)
         val normalizedQuery = searchQuery.query.trim()
-        val records = list(
+        val records = visibleRecords(
             MemoryFilter(
                 scopeContext = searchQuery.scopeContext,
                 type = searchQuery.type,
@@ -112,7 +127,8 @@ class MemoryController(
             .filter { normalizedQuery.isBlank() || it.score > 0.0 }
             .sortedWith(
                 compareByDescending<MemorySearchResult> { it.score }
-                    .thenByDescending { it.record.updatedAt },
+                    .thenByDescending { it.record.updatedAt }
+                    .thenBy { it.record.id },
             )
             .take(limit)
             .toList()
@@ -206,12 +222,34 @@ class MemoryController(
     }
 
     private fun tokenize(value: String): Set<String> {
-        return value
-            .lowercase()
-            .split(Regex("[^a-z0-9\\p{IsHan}]+"))
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .toSet()
+        return buildSet {
+            TOKEN_PATTERN.findAll(value.lowercase()).forEach { match ->
+                val token = match.value
+                add(token)
+                if (Character.UnicodeScript.of(token.codePointAt(0)) == Character.UnicodeScript.HAN) {
+                    val points = token.codePoints().toArray()
+                    for (index in 0 until points.lastIndex) {
+                        add(String(Character.toChars(points[index])) + String(Character.toChars(points[index + 1])))
+                    }
+                }
+            }
+        }
+    }
+
+    /** Authenticated catalog administration; Agent tools use scope-filtered list/search/delete. */
+    fun listLibrary(libraryId: String, query: String = "", limit: Int = 100, offset: Long = 0): List<MemoryRecord> = db.execute {
+        MemoryRecordsTable.selectAll().where {
+            (MemoryRecordsTable.workspaceId eq "platform") and (MemoryRecordsTable.libraryId eq libraryId) and MemoryRecordsTable.deletedAt.isNull()
+        }.apply {
+            if (query.isNotBlank()) andWhere { MemoryRecordsTable.content.lowerCase() like "%${query.lowercase()}%" }
+        }.orderBy(MemoryRecordsTable.updatedAt, SortOrder.DESC).limit(limit.coerceIn(1, 200), offset.coerceAtLeast(0)).map { it.toMemoryRecord() }
+    }
+
+    fun deleteLibraryRecord(libraryId: String, id: String): Boolean = db.execute {
+        MemoryRecordsTable.update({
+            (MemoryRecordsTable.workspaceId eq "platform") and (MemoryRecordsTable.libraryId eq libraryId) and
+                (MemoryRecordsTable.id eq id) and MemoryRecordsTable.deletedAt.isNull()
+        }) { it[deletedAt] = System.currentTimeMillis() } > 0
     }
 
     private fun MemoryRecord.isExpired(nowMillis: Long): Boolean {
@@ -220,11 +258,13 @@ class MemoryController(
 
     private fun MemoryRecord.isVisibleTo(scopeContext: MemoryScopeContext): Boolean {
         if (workspaceId != scopeContext.workspaceId) return false
+        if (scopeContext.allowedScopes != null && scope !in scopeContext.allowedScopes) return false
+        if (scopeContext.libraryIds != null && libraryId !in scopeContext.libraryIds) return false
         return when (scope) {
             MemoryScope.GLOBAL -> true
             MemoryScope.PLATFORM -> platformId == scopeContext.platformId
-            MemoryScope.SESSION -> sessionId == scopeContext.sessionId
-            MemoryScope.USER -> userId == scopeContext.userId
+            MemoryScope.SESSION -> sessionId == scopeContext.sessionId && (platformId == null || platformId == scopeContext.platformId)
+            MemoryScope.USER -> userId == scopeContext.userId && (platformId == null || platformId == scopeContext.platformId)
             MemoryScope.AGENT -> agentName == scopeContext.agentName
         }
     }
@@ -233,6 +273,7 @@ class MemoryController(
         return MemoryRecord(
             id = this[MemoryRecordsTable.id],
             workspaceId = this[MemoryRecordsTable.workspaceId],
+            libraryId = this[MemoryRecordsTable.libraryId],
             scope = MemoryScope.valueOf(this[MemoryRecordsTable.scope]),
             platformId = this[MemoryRecordsTable.platformId],
             sessionId = this[MemoryRecordsTable.sessionId],
@@ -247,5 +288,9 @@ class MemoryController(
             expiresAt = this[MemoryRecordsTable.expiresAt],
             deletedAt = this[MemoryRecordsTable.deletedAt],
         )
+    }
+
+    private companion object {
+        val TOKEN_PATTERN = Regex("[a-z0-9]+|[\\p{IsHan}]+")
     }
 }

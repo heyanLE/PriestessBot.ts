@@ -1,5 +1,6 @@
 package com.heyanle.priestess.bot.skill
 
+import com.heyanle.priestess.bot.config.model.EffectiveWorkspaceSnapshot
 import com.heyanle.priestess.bot.workspace.WorkspaceSnapshot
 import com.heyanle.priestess.bot.pipeline.PermissionGroup
 
@@ -18,6 +19,29 @@ class SkillCase(
         permissionGroup: PermissionGroup = PermissionGroup.OPERATOR,
     ): PipelineSkillState {
         return PipelineSkillState(getWorkspaceSkillReferences(snapshot, permissionGroup), permissionGroup)
+    }
+
+    fun getEffectiveSkillState(
+        snapshot: EffectiveWorkspaceSnapshot,
+        permissionGroup: PermissionGroup = PermissionGroup.OPERATOR,
+    ): PipelineSkillState {
+        val configured = snapshot.config.skills
+            .filter { it.enabled }
+            .associateBy { it.id }
+        val references = controller.getAll()
+            .filter { it.name in configured }
+            .sortedByDescending { it.priority }
+            .map { skill ->
+                val settings = configured.getValue(skill.name).settings
+                SkillPromptReference(
+                    name = skill.name,
+                    description = skill.description,
+                    inlineMarkdown = skill.skillMarkdown ?: skill.promptMarkdown(),
+                    settings = settings,
+                    requiredPermissionGroup = skill.requiredPermissionGroup,
+                )
+            }
+        return PipelineSkillState(references, permissionGroup)
     }
 
     fun getWorkspaceSkillReferences(

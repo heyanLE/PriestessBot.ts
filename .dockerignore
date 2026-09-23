@@ -1,0 +1,12 @@
+# Device-local credentials and development state must not enter build context.
+local.properties
+.env
+.env.*
+config.local-debug.json
+data/local-debug/
+.git/
+.gradle/
+.local-gradle*/
+build/
+dashboard/node_modules/
+dashboard/dist/

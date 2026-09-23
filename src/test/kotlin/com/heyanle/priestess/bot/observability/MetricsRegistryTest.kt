@@ -3,8 +3,8 @@ package com.heyanle.priestess.bot.observability
 import com.heyanle.priestess.bot.agent.Agent
 import com.heyanle.priestess.bot.agent.AgentCase
 import com.heyanle.priestess.bot.agent.AgentContext
-import com.heyanle.priestess.bot.config.ConfigCase
-import com.heyanle.priestess.bot.config.ConfigController
+import com.heyanle.priestess.bot.config.model.AppConfigDocument
+import com.heyanle.priestess.bot.config.model.ProviderConnectionDocument
 import com.heyanle.priestess.bot.pipeline.PipelineContext
 import com.heyanle.priestess.bot.pipeline.PipelineController
 import com.heyanle.priestess.bot.pipeline.Stage
@@ -21,6 +21,7 @@ import com.heyanle.priestess.bot.provider.LLMKind
 import com.heyanle.priestess.bot.provider.ProviderCase
 import com.heyanle.priestess.bot.provider.ProviderController
 import com.heyanle.priestess.bot.provider.ProviderMetadata
+import com.heyanle.priestess.bot.provider.ProviderRegistry
 import com.heyanle.priestess.bot.provider.model.LLMRequest
 import com.heyanle.priestess.bot.provider.model.LLMResponse
 import com.heyanle.priestess.bot.provider.model.ConversationMessage
@@ -28,6 +29,7 @@ import com.heyanle.priestess.bot.tool.AgentToolContext
 import com.heyanle.priestess.bot.tool.FunctionTool
 import com.heyanle.priestess.bot.tool.ToolCase
 import com.heyanle.priestess.bot.tool.ToolController
+import com.heyanle.priestess.bot.testkit.testRuntimeConfiguration
 import com.heyanle.priestess.bot.tool.ToolExecutor
 import com.heyanle.priestess.bot.tool.ToolResult
 import com.heyanle.priestess.bot.tool.ToolSchema
@@ -85,8 +87,9 @@ class MetricsRegistryTest {
     fun `process stage records llm metrics`() = runBlocking {
         val registry = MetricsRegistry()
         val observabilityCase = ObservabilityCase.standalone(registry)
-        val providerController = ProviderController(configCase = ConfigCase(ConfigController(tempConfigPath())))
-        providerController.register(MetricsProvider())
+        ProviderRegistry.register(MetricsProvider().metadata) { MetricsProvider() }
+        val runtime = testRuntimeConfiguration(AppConfigDocument(providers = listOf(ProviderConnectionDocument("metrics-provider", "metrics-provider"))))
+        val providerController = ProviderController(runtime.case)
         val stage = ProcessStage(
             agentCase = AgentCase(),
             providerCase = ProviderCase(providerController),
@@ -94,11 +97,13 @@ class MetricsRegistryTest {
             observabilityCase = observabilityCase,
         )
         val ctx = PipelineContext(messageEvent("hello")).also {
+            it.pinConfiguration(runtime.store.acquire())
             it.agentContext = AgentContext(
                 agent = Agent(
                     name = "metrics-agent",
                     instructions = "reply",
                     model = "metrics-provider",
+                    providerName = "metrics-provider",
                     maxSteps = 1,
                 ),
                 conversationId = "conversation-secret",
@@ -115,6 +120,8 @@ class MetricsRegistryTest {
         assertContains(output, "priestess_llm_request_duration_milliseconds_count{provider=\"metrics-provider\",status=\"success\"} 1")
         assertFalse(output.contains("conversation-secret"))
         providerController.stop()
+        ctx.releaseConfiguration()
+        ProviderRegistry.unregister("metrics-provider")
     }
 
     @Test

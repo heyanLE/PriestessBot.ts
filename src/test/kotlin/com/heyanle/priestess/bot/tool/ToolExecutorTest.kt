@@ -5,12 +5,34 @@ import com.heyanle.priestess.bot.observability.ObservabilityCase
 import com.heyanle.priestess.bot.testkit.FakeTool
 import com.heyanle.priestess.bot.pipeline.PermissionGroup
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
 
 class ToolExecutorTest {
+    @Test
+    fun `external cancellation is propagated instead of becoming an error result`() = runBlocking {
+        val registry = ToolController().apply { register(FakeTool(failure = CancellationException("cancelled by caller"))) }
+        assertFailsWith<CancellationException> {
+            ToolExecutor(registry).execute(AgentToolContext(), "fake_tool", """{"value":"abc"}""")
+        }
+    }
+
+    @Test
+    fun `parent timeout is not mistaken for the tools own timeout`() = runBlocking {
+        val registry = ToolController().apply { register(FakeTool(delayMs = 1_000)) }
+        assertFailsWith<TimeoutCancellationException> {
+            withTimeout(20) {
+                ToolExecutor(registry).execute(AgentToolContext(), "fake_tool", """{"value":"abc"}""", timeoutMillis = 5_000)
+            }
+        }
+    }
+
     @Test
     fun `unknown tool returns error result`() = runBlocking {
         val executor = ToolExecutor(ToolController())
@@ -96,6 +118,39 @@ class ToolExecutorTest {
         assertEquals(ToolPolicyDenialCode.INSUFFICIENT_PERMISSION, result.policyDenialCode)
         assertTrue(result.error.contains("current=OPERATOR required=ADMIN"))
         assertTrue(tool.calls.isEmpty())
+    }
+
+    @Test
+    fun `Agent tool minimum permission can raise but not lower a tool requirement`() = runBlocking {
+        val controller = ToolController()
+        val ordinary = FakeTool(name = "ordinary_tool")
+        val admin = FakeTool(schema = ToolSchema(name = "admin_tool", requiredPermissionGroup = PermissionGroup.ADMIN))
+        controller.registerAll(listOf(ordinary, admin))
+        val executor = ToolExecutor(controller)
+
+        val raised = executor.execute(
+            AgentToolContext(
+                permissionGroup = PermissionGroup.OPERATOR,
+                minimumToolPermissionGroups = mapOf("ordinary_tool" to PermissionGroup.ADMIN),
+            ),
+            "ordinary_tool",
+            """{"value":"abc"}""",
+        )
+        val loweredAttempt = executor.execute(
+            AgentToolContext(
+                permissionGroup = PermissionGroup.OPERATOR,
+                minimumToolPermissionGroups = mapOf("admin_tool" to PermissionGroup.OPERATOR),
+            ),
+            "admin_tool",
+            "{}",
+        )
+
+        assertEquals(ToolPolicyDenialCode.INSUFFICIENT_PERMISSION, raised.policyDenialCode)
+        assertTrue(raised.error.contains("required=ADMIN"))
+        assertEquals(ToolPolicyDenialCode.INSUFFICIENT_PERMISSION, loweredAttempt.policyDenialCode)
+        assertTrue(loweredAttempt.error.contains("required=ADMIN"))
+        assertTrue(ordinary.calls.isEmpty())
+        assertTrue(admin.calls.isEmpty())
     }
 
     @Test

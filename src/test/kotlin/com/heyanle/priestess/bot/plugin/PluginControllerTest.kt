@@ -1,9 +1,8 @@
 package com.heyanle.priestess.bot.plugin
 
-import com.heyanle.priestess.bot.config.ConfigCase
-import com.heyanle.priestess.bot.config.ConfigController
-import com.heyanle.priestess.bot.config.PluginConfig
-import com.heyanle.priestess.bot.config.PriestessConfig
+import com.heyanle.priestess.bot.config.model.AppConfigDocument
+import com.heyanle.priestess.bot.config.model.PluginRuntimeDocument
+import com.heyanle.priestess.bot.config.model.RuntimeConfigDocument
 import com.heyanle.priestess.bot.provider.ProviderCase
 import com.heyanle.priestess.bot.provider.ProviderController
 import com.heyanle.priestess.bot.provider.model.LLMRequest
@@ -12,6 +11,7 @@ import com.heyanle.priestess.bot.platform.PlatformRegistry
 import com.heyanle.priestess.bot.tool.AgentToolContext
 import com.heyanle.priestess.bot.tool.ToolCase
 import com.heyanle.priestess.bot.tool.ToolController
+import com.heyanle.priestess.bot.testkit.testRuntimeConfiguration
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.runBlocking
@@ -40,17 +40,12 @@ class PluginControllerTest {
                 ),
             ),
         )
-        val configPath = Files.createTempDirectory("priestess-plugin-config").resolve("config.json")
-        val controller = ConfigController(configPath.toString())
-        controller.replace(
-            PriestessConfig(plugins = PluginConfig(directory = root.toString(), autoDiscover = false)),
-        )
-        val configCase = ConfigCase(controller)
+        val runtime = pluginRuntime(root.toString())
         val manager = PluginController(
-            configCase = configCase,
+            runtimeConfig = runtime.case,
             extensionRegistry = PluginExtensionRegistry(),
             toolCase = ToolCase(ToolController()),
-            providerCase = ProviderCase(ProviderController(configCase)),
+            providerCase = ProviderCase(ProviderController(runtime.case)),
         )
 
         val discovered = manager.discover().single()
@@ -158,20 +153,19 @@ class PluginControllerTest {
         registry: PluginExtensionRegistry,
         toolController: ToolController,
     ): Pair<PluginController, ProviderController> {
-        val configPath = Files.createTempDirectory("priestess-plugin-config").resolve("config.json")
-        val controller = ConfigController(configPath.toString())
-        controller.replace(
-            PriestessConfig(plugins = PluginConfig(directory = pluginDir, autoDiscover = false)),
-        )
-        val configCase = ConfigCase(controller)
-        val providerController = ProviderController(configCase)
+        val runtime = pluginRuntime(pluginDir)
+        val providerController = ProviderController(runtime.case)
         return PluginController(
-            configCase = configCase,
+            runtimeConfig = runtime.case,
             extensionRegistry = registry,
             toolCase = ToolCase(toolController),
             providerCase = ProviderCase(providerController),
         ) to providerController
     }
+
+    private fun pluginRuntime(directory: String) = testRuntimeConfiguration(
+        AppConfigDocument(runtime = RuntimeConfigDocument(plugins = PluginRuntimeDocument(directory = directory, autoDiscover = false))),
+    )
 
     private fun buildJavaPluginJar(pluginDir: File, className: String) {
         val sourceRoot = pluginDir.resolve("src")
@@ -275,7 +269,8 @@ class PluginControllerTest {
                         "",
                         "",
                         true,
-                        new java.util.LinkedHashMap<String, String>()
+                        new java.util.LinkedHashMap<String, String>(),
+                        true
                     );
 
                     @Override
@@ -328,8 +323,8 @@ class PluginControllerTest {
                     }
 
                     @Override
-                    public Object sendMessage(MessageSession session, MessageChain chain, kotlin.coroutines.Continuation<? super kotlin.Unit> continuation) {
-                        return kotlin.Unit.INSTANCE;
+                    public Object sendMessage(MessageSession session, MessageChain chain, kotlin.coroutines.Continuation<? super String> continuation) {
+                        return "demo-message";
                     }
                 }
             }

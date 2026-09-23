@@ -24,6 +24,8 @@ class PlatformCase(
 
     fun runningPlatformCount(): Int = runningPlatformNames().size
 
+    suspend fun restart(name: String): Boolean = controllerProvider().restart(name)
+
     suspend fun stop() {
         controllerProvider().stop()
     }

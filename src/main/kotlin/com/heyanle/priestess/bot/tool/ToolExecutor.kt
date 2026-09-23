@@ -2,11 +2,15 @@ package com.heyanle.priestess.bot.tool
 
 import com.heyanle.priestess.bot.observability.ObservabilityCase
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import com.heyanle.priestess.bot.pipeline.PermissionDeniedMessageResolver
 import com.heyanle.priestess.bot.pipeline.PermissionMessageContext
+import com.heyanle.priestess.bot.pipeline.PermissionGroup
 
 /**
  * 工具执行器，负责解析工具名、校验参数、执行工具并记录调用指标。
@@ -67,7 +71,11 @@ class ToolExecutor(
             }
         }
 
-        if (!context.permissionGroup.satisfies(tool.schema.requiredPermissionGroup)) {
+        val requiredPermissionGroup = maxOf(
+            tool.schema.requiredPermissionGroup,
+            context.minimumToolPermissionGroups[tool.schema.name] ?: PermissionGroup.OPERATOR,
+        )
+        if (!context.permissionGroup.satisfies(requiredPermissionGroup)) {
             return ToolResult.permissionDenied(
                 ToolPolicyDecision.denied(
                     code = ToolPolicyDenialCode.INSUFFICIENT_PERMISSION,
@@ -76,7 +84,7 @@ class ToolExecutor(
                             workspaceId = context.metadata["workspaceId"].orEmpty(),
                             agentName = context.agentName,
                         ),
-                    ) + " current=${context.permissionGroup} required=${tool.schema.requiredPermissionGroup}",
+                    ) + " current=${context.permissionGroup} required=$requiredPermissionGroup",
                     auditLog = tool.schema.auditLog,
                 ),
             ).also { recordToolCall(tool.schema.name, "permission_denied") }
@@ -96,9 +104,12 @@ class ToolExecutor(
                 recordToolCall(tool.schema.name, if (it.success) "success" else "error")
             }
         } catch (e: TimeoutCancellationException) {
+            currentCoroutineContext().ensureActive()
             ToolResult.timeout(toolCallName, timeoutMillis).also {
                 recordToolCall(tool.schema.name, "timeout")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             ToolResult.error("Tool '$toolCallName' execution failed: ${e.message}").also {
                 recordToolCall(tool.schema.name, "error")
