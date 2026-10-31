@@ -1,0 +1,12 @@
+import { z } from 'zod';
+import { AgentIdSchema, PrincipalSchema, MemoryRecordSchema } from './index.js';
+export const MemoryScopeSchema = z.object({ agentId: AgentIdSchema, libraryId: z.string().min(1), principal: PrincipalSchema, scope: z.enum(['sender', 'session', 'agent']) }).strict();
+export type MemoryScope = z.infer<typeof MemoryScopeSchema>;
+export const MemoryMergeSchema = z.object({ sourceIds: z.array(z.string()).min(1).max(30), text: z.string().trim().min(1).max(4000) }).strict();
+export const MemoryModelProposalSchema = z.object({ merges: z.array(MemoryMergeSchema).max(30) }).strict();
+export const MemoryProposalSchema = z.object({ id: z.string(), scope: MemoryScopeSchema, configRevision: z.number().int(), createdAt: z.number(), status: z.enum(['pending', 'applied']), sources: z.array(z.object({ record: MemoryRecordSchema, hash: z.string() })), merges: z.array(MemoryMergeSchema), appliedAt: z.number().optional() }).strict();
+export type MemoryProposal = z.infer<typeof MemoryProposalSchema>;
+export const MemoryPolicyInputSchema = z.object({ scope: MemoryScopeSchema, enabled: z.boolean(), intervalMinutes: z.number().int().min(5).max(10080), autoApply: z.boolean().default(false) }).strict();
+export const MemoryPolicySchema = MemoryPolicyInputSchema.extend({ id: z.string(), revision: z.number().int(), nextRunAt: z.number() });
+export const MemoryMaintenanceJobSchema = z.object({ id: z.string(), scope: MemoryScopeSchema, status: z.enum(['running', 'completed', 'failed', 'cancelled', 'interrupted']), createdAt: z.number(), updatedAt: z.number(), proposalId: z.string().optional(), summary: z.string() }).strict();
+export const MemoryMaintenanceResponseSchema = z.object({ proposals: z.array(MemoryProposalSchema), policies: z.array(MemoryPolicySchema), jobs: z.array(MemoryMaintenanceJobSchema) });

@@ -1,0 +1,18 @@
+services:
+  priestess:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      PRIESTESS_API_TOKEN: ${PRIESTESS_API_TOKEN:?set a management token}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      NAPCAT_TOKEN: ${NAPCAT_TOKEN:-}
+      WEIXIN_TOKEN: ${WEIXIN_TOKEN:-}
+    volumes:
+      - runtime-data:/data
+    restart: unless-stopped
+volumes:
+  runtime-data:

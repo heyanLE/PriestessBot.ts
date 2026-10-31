@@ -5,6 +5,8 @@ description: Restart and validate this project's Telegram bot smoke-test flow th
 
 # Telegram Web Smoke
 
+The current runtime is the root TypeScript project. Kotlin smoke artifacts are archived under `archive/kotlin/`; never start the archived IM consumer alongside the current bot.
+
 Drive the repo's live Telegram smoke-test loop: start the local bot server, operate the standalone Telegram Web app, send one test command at a time, and verify each result against logs or health endpoints.
 
 Read [references/runbook.md](references/runbook.md) before doing a live smoke test. It contains the project paths, concrete prompts, and the Telegram Web input-box rules learned during debugging.
@@ -12,7 +14,7 @@ Read [references/runbook.md](references/runbook.md) before doing a live smoke te
 ## Quick Start
 
 1. Read the runbook and use its project anchors instead of re-discovering the setup.
-2. Start or restart the local server with `run-server.sh`.
+2. Start the current PriestessBot server from the repository root using `npm run dev` with the intended isolated configuration/data directory. `archive/kotlin/run-server.sh` is historical and must not be used for the current runtime.
 3. Verify the server is actually responding before touching Telegram Web.
 4. Use Computer Use against the standalone `Telegram Web` app, not an arbitrary browser tab.
 5. Send one test prompt at a time and verify the response with logs, health checks, or chat evidence.

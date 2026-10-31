@@ -2,63 +2,62 @@
 
 ## Purpose
 TBD - created by archiving change sub-agent-routing-foundation. Update Purpose after archive.
+
+> TypeScript requirements apply to runtime `priestess-ts`. Unmodified Kotlin/workspace-specific requirements below remain reference requirements for the legacy runtime.
+
 ## Requirements
 
 ### Requirement: Sub-agent routing config
-The system SHALL support serializable sub-agent orchestration configuration scoped by workspace.
+The system SHALL configure explicit delegation target bindings on independent Agents and route top-level messages through the single built-in flow.
 
 #### Scenario: Default config is backward-compatible
-- **GIVEN** an existing config file without orchestration fields
-- **WHEN** it is decoded
-- **THEN** orchestration defaults are available without failing config load
+- **WHEN** an Agent omits delegation bindings
+- **THEN** it SHALL remain usable without delegated execution
 
-#### Scenario: Workspace provides agent and persona scope
-- **GIVEN** a workspace config defines agents and personas
-- **WHEN** the workspace snapshot is built
-- **THEN** the snapshot exposes only the agents and personas configured for that workspace
+#### Scenario: Agent provides target scope
+- **WHEN** an Agent selects delegation targets
+- **THEN** only enabled permitted targets SHALL be exposed to that Agent
 
 ### Requirement: Keyword route selection
-The system SHALL route messages to sub-agents by deterministic keyword rules.
+Top-level Agent selection SHALL evaluate deterministic node rules, including configured text conditions, and a valid default or explicit terminal outcome.
 
-#### Scenario: Keyword route matches
-- **GIVEN** orchestration is enabled with a route targeting a sub-agent
-- **WHEN** an input message contains a route keyword
-- **THEN** the orchestrator selects the targeted sub-agent
+#### Scenario: Keyword rule matches
+- **WHEN** a configured text condition matches
+- **THEN** the fixed flow SHALL select the referenced Agent
 
-#### Scenario: No route falls back
-- **GIVEN** orchestration is enabled without a matching route
-- **WHEN** an input message is tested
-- **THEN** the orchestrator selects the configured default sub-agent or the primary Agent
+#### Scenario: No rule matches
+- **WHEN** no selection rule matches
+- **THEN** the configured default Agent or explicit ignore/reject outcome SHALL apply
 
 ### Requirement: Routed Agent execution
-The system SHALL execute the selected sub-agent using the existing Agent runtime within the resolved workspace snapshot.
+The selected Agent SHALL execute through the common typed engine interface using its pinned configuration and effective turn authorization.
 
 #### Scenario: Selected Agent returns final response
-- **GIVEN** a selected sub-agent provider is available
-- **WHEN** the orchestrator runs a message
-- **THEN** the response includes the selected agent name and final content
+- **WHEN** a selected Agent completes
+- **THEN** the result SHALL identify that Agent and its typed response content
 
-#### Scenario: Selected agent uses workspace provider and persona
-- **GIVEN** a message resolved workspace snapshot version `N`
-- **WHEN** the orchestrator selects an agent for that message
-- **THEN** the selected agent, provider selection, persona, and execution limits are read from snapshot version `N`
+#### Scenario: Selected Agent uses its resources
+- **WHEN** a message selects an Agent
+- **THEN** provider, persona, libraries and budgets SHALL come from that Agent's valid configuration revision
 
 ### Requirement: Sub-agent route selection
-The system SHALL select a configured sub-agent deterministically from an incoming message within the resolved workspace.
+Agent selection SHALL remain deterministic within the fixed flow and distinct from an Agent actively delegating a child task.
 
-#### Scenario: Pipeline uses selected sub-agent
-- **GIVEN** sub-agent orchestration is enabled
-- **AND** a route keyword matches an incoming platform message
-- **WHEN** the message reaches pipeline pre-processing
-- **THEN** the selected route target agent is used to create the pipeline `AgentContext`
-- **AND** downstream ReAct execution uses that selected agent
+#### Scenario: Pipeline uses selected Agent
+- **WHEN** an accepted normal message resolves a target Agent
+- **THEN** exactly that top-level Agent SHALL run with trusted sender/state context
 
-#### Scenario: Pipeline preserves primary agent fallback
-- **GIVEN** sub-agent orchestration is disabled or has no matching/default agent
-- **WHEN** an incoming platform message reaches pipeline pre-processing
-- **THEN** the primary configured Agent is used as before
+### Requirement: Active delegation lifecycle
+An Agent SHALL be able to invoke an explicitly bound target with a bounded task context. Child runs SHALL use independent engine sessions, inherit parent permission ceilings, obey depth/count/concurrency and shared budgets, and propagate parent cancellation.
 
-#### Scenario: Route selection is workspace-scoped
-- **GIVEN** two workspaces define different route targets for the same keyword
-- **WHEN** messages resolve different workspace snapshots
-- **THEN** each message uses the route target from its resolved workspace snapshot
+#### Scenario: Child result returns to parent
+- **WHEN** a delegated task completes
+- **THEN** its result SHALL return to the parent as a source-labeled tool result without an unsolicited separate IM reply
+
+#### Scenario: Parent cancellation
+- **WHEN** a parent run is cancelled
+- **THEN** owned child runs SHALL be cancelled and SHALL not perform later effects or replies
+
+#### Scenario: Scheduler deadlock prevention
+- **WHEN** a parent awaits a child
+- **THEN** child scheduling SHALL not depend on a conversation lock or concurrency slot permanently held by that waiting parent

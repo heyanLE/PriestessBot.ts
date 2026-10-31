@@ -1,28 +1,32 @@
 {
-  "name": "priestess-dashboard",
+  "name": "priestessbot-dashboard",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "npm run check:typescript-strict && vue-tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test:config-runtime": "node scripts/config-v3-smoke-test.mjs",
-    "test:workspaces": "node scripts/workspace-view-smoke-test.mjs",
-    "test:persona-memory": "node scripts/persona-memory-smoke-test.mjs",
-    "test:config-v3": "node scripts/config-v3-smoke-test.mjs",
-    "test:v3-browser": "node scripts/v3-browser-smoke-test.mjs",
-    "test:v3-live": "node scripts/v3-live-smoke-test.mjs",
-    "test:tool-policy": "node scripts/tool-policy-smoke-test.mjs"
+    "test:typescript": "node --import ../node_modules/tsx/dist/loader.mjs scripts/ts-browser-smoke-test.mjs",
+    "test:typescript-live": "node --import ../node_modules/tsx/dist/loader.mjs scripts/ts-live-smoke-test.mjs",
+    "check:typescript-strict": "tsc -p tsconfig.tools.json && node scripts/ts-strict-check.ts",
+    "test:workflows": "tsc -p tsconfig.workflow-tests.json && node --import ../node_modules/tsx/dist/loader.mjs --test scripts/workflow-*.test.ts"
   },
   "dependencies": {
     "@phosphor-icons/vue": "^2.2.1",
     "@vitejs/plugin-vue": "^5.2.4",
     "pinia": "^2.3.1",
+    "qrcode": "1.5.4",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
     "vue": "^3.5.13",
     "vue-router": "^4.5.1",
     "vue-tsc": "^2.2.10"
+  },
+  "devDependencies": {
+    "@types/qrcode": "1.5.5"
+  },
+  "engines": {
+    "node": ">=22.18.0"
   }
 }

@@ -20,6 +20,7 @@ This change defines the model and the split. It ships no runtime behaviour: its 
 - **Tool injection becomes a route-scoped decision.** The injection mode is configured on the IM route that selected the Agent, because without an incoming IM message there is nothing to inject; unsupported combinations are rejected against the target Agent's type.
 - **A tool library replaces the flat tool switch table**, holding per-tool settings and credential references, with the library supplying defaults that an Agent may override.
 - **Retain, do not reimplement.** An external engine's own tools keep precedence, and the boundary consequence — that engine-native actions are outside `toolPolicy` — is disclosed by validation and in operator documentation rather than left implicit.
+- **Keep external turns stateful and accountable.** PriestessBot calls the reference fork's public Rust `Engine` through a JNI library in the same JVM process. It resumes a durable thread per IM conversation, derives the dynamic-tool manifest for each turn, and routes tool calls and approvals through the originating caller's identity. The custom Responses provider is configured in memory without a Codex login or an app-server process.
 - **Supersede the two earlier proposals.** `add-agent-runtime-scope` (scope selection + `ExternalAgentRunner` + `engineId`) and `add-codex-agent-type` (app-server engine built on that scope) are replaced by this model and its roadmap. Their verified findings are preserved in `design.md`; the proposal documents themselves are removed.
 
 ## Capabilities
@@ -43,11 +44,11 @@ This change is the umbrella. Each item below becomes its own change with its own
 | P2 | `add-agent-types` | Agent type registry, capability declaration, external-runner seam | P1 |
 | P3 | `add-tool-library` | tool library entries, per-tool settings, credential references | independent |
 | P4 | `add-im-tool-injection` | route-scoped injection modes, single-dispatcher contract | `add-platform-scoped-tools`, P2, P3 |
-| P5 | `add-codex-engine` | the `codex` external engine over app-server | P1, P2, P4 |
+| P5 | `add-codex-engine` | JNI binding to the reference fork's Rust `Engine` | P1, P2, P4 |
 
 P0 was a prerequisite for all of them and is complete: both changes were implemented in the working tree but unarchived, and `add-agent-types` modifies the capabilities they introduce. Their delta specs are now synced into the main specs (`agent-presets`, `agent-im-runtime`, `execution-trace-dashboard`, `agent-loop`).
 
-P5 deliberately carries forward the app-server findings recorded in this change's `design.md`, including the one unverified mechanism (`dynamicTools`) that must be spiked before P5 is scoped as implementable.
+P5 uses the fork's in-process `astrbot-py` engine module with the optional Python feature disabled. Its event, dynamic-tool and authorization paths need a JNI smoke test against a pinned fork revision and a mock Responses endpoint before the CODEX type is enabled.
 
 ## Impact
 

@@ -1,66 +1,56 @@
-.gradle
+# Dependencies and generated outputs (including archived toolchains).
+node_modules/
+dist/
 build/
+coverage/
+.gradle/
+.kotlin/
+.local-gradle/
+.local-gradle-home/
+.build/
+*.log
 !gradle/wrapper/gradle-wrapper.jar
-!**/src/main/**/build/
-!**/src/test/**/build/
+!archive/kotlin/gradle/wrapper/gradle-wrapper.jar
 
-### IntelliJ IDEA ###
-.idea/modules.xml
-.idea/jarRepositories.xml
-.idea/compiler.xml
-.idea/libraries/
+# Runtime data and local credentials.
+.runtime/
+.priestess/
+.env
+.env.*
+config.local.json
+archive/kotlin/config.json
+archive/kotlin/config.local-debug.json
+archive/kotlin/local.properties
+archive/kotlin/platform/
+archive/kotlin/agents/
+archive/kotlin/data/
+archive/kotlin/manual-test-logs/
+archive/kotlin/src/test/*.local.bat
+archive/kotlin/deploy-nas.local.bat
+
+# Editor and operating-system state.
+.idea/
+.vscode/
 *.iws
 *.iml
 *.ipr
-out/
-!**/src/main/**/out/
-!**/src/test/**/out/
-
-### Kotlin ###
-.kotlin
-
-### Dashboard frontend ###
-dashboard/node_modules/
-dashboard/dist/
-
-### Runtime Weixin state and QR credentials ###
-.priestess/
-data/weixin*/
-
-### Local manual integration launchers ###
-src/test/*.local.bat
-deploy-nas.local.bat
-manual-test-logs/
-
-### Eclipse ###
-.apt_generated
+.DS_Store
+.apt_generated/
 .classpath
 .factorypath
 .project
-.settings
+.settings/
 .springBeans
-.sts4-cache
+.sts4-cache/
+out/
 bin/
-!**/src/main/**/bin/
-!**/src/test/**/bin/
-
-### NetBeans ###
 /nbproject/private/
 /nbbuild/
-/dist/
 /nbdist/
 /.nb-gradle/
 
-### VS Code ###
-.vscode/
-
-### Mac OS ###
-.DS_Store
-
-### Application resource runtime ###
-/platform/
-/agents/
-/data/local-debug/
-/.env.local-debug
-/local.properties
-/config.local-debug.json
+# Local task artifacts, sessions, and historical native build cache.
+.research/
+.codebuddy/teams/
+.codex/config.toml
+target/

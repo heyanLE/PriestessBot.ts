@@ -1,41 +1,66 @@
-# Dashboard design direction
+# PriestessBot Dashboard design
 
-Applied reference: [Anthropic frontend-design skill](https://github.com/anthropics/skills/blob/main/skills/frontend-design/SKILL.md), read on 2026-09-16. This is an implementation in the existing Vue application, not a new prototype or backend redesign.
+## Product
 
-## Product and task
+PriestessBot is the operator console for Agents, IM robots, conversations and tool execution. Preserve the existing Logo and green visual theme. The live app uses only the current Node.js runtime; archived Kotlin and Rust modules are not imported or bundled.
 
-PriestessBot is an operator console for composing Agents, routing IM messages, and diagnosing model/tool executions. Keep the existing logo image and PriestessBot name. Preserve configuration preview/revision checks and all current resource permissions.
+Historical design references and earlier implementations remain in `archive/kotlin/dashboard`. External project names, URLs and license notices in that archive remain attributable to their actual authors.
 
-## Tokens
+## Visual tokens
 
-User refinement: keep the new UX and restore the earlier yellow/gold visual style, including a warm light navigation surface. The logo is unchanged.
+- Canvas: `#F2F6F4`.
+- Working surface: `#FFFFFF`.
+- Primary content: `#213B33`.
+- Navigation: `#EDF4EF`.
+- Main action: `#327D68`; selected surface: `#E2F1E9`.
+- Structural separator: `#DCE7E1`.
 
-- Parchment `#F5F1E8`: application canvas.
-- Ivory `#FFFDF7`: working surface.
-- Ink `#2D281F`: primary content.
-- Sand `#F2ECDF`: navigation.
-- Gold `#B58A38`: primary action and selection accent, matching the earlier theme.
-- Linen `#E5DCCB`: structural separators.
+Use Avenir Next for Latin text and PingFang SC/Hiragino Sans GB for Chinese. Keep field labels readable, reserve monospace for actual IDs and code, and use small corner radii with limited shadows. Green identifies the current location and primary action. Avoid decorative gradients, nested panels and invented status data.
 
-Typography: Avenir Next for Latin names and interface controls, PingFang SC/Hiragino Sans GB for Chinese. Use a 12/13/14/16/22/28 scale. Reserve monospace for actual code, IDs and payloads. Body fields and operational labels remain sans-serif. Use 6–10 px corner radii, limited shadows and visible keyboard focus.
+## Navigation
 
-## Layout alternatives and review
+| Primary workspace | Contents |
+| --- | --- |
+| Workbench | Overview, conversations, console chat, runs and approvals, background processes, files |
+| Agent | Model/persona, tools/resources, context/memory, execution/approvals |
+| Robots | Platform instances, connection wizard, message routing, sender roles |
+| Resources | Personas, knowledge, memory, capability directory, plugin/search settings, MCP and Skills |
+| Settings | Management credentials and audit, model connections, execution environments |
 
-A single long form keeps all fields in document order but makes model choice, resource mounting and execution budgets difficult to locate. The selected object workbench gives each task a stable place without discarding drafts when switching sections.
+Keep stable URLs and browser history. Object and section query parameters retain the selected Agent, platform, conversation or run. A new page starts at the top; Back/Forward restores the browser's saved position. Compatibility routes redirect to current pages instead of loading historical applications.
 
-```
-Long-form alternative         Selected workbench
-navigation | object list      navigation | page / connection status
-           | all fields                  | preview / apply controls
-           | all resources               | object list | object identity
-           | all budgets                 |             | task tabs
-                                         |             | active editor
-```
+## Editing and publication
 
-All form content is left aligned. Agent uses four sections; IM uses connection, route and identity sections. The route number is meaningful priority, so numbering is retained there. Execution details use an ordered timeline with payload disclosure, not expanded JSON everywhere.
+The Agent workspace keeps configuration and model testing side by side on desktop. The test panel remains visible while long configuration forms scroll. Narrow layouts stack them. Show the model and persona before advanced identity, prompt compilation and budget details.
 
-The existing logo anchors a warm navigation frame. Gold indicates the current location and primary actions; ivory working surfaces keep dense forms readable. Avoid decorative gradients, generic large hero headlines, repeated title cards and invented monitoring data. Configuration filenames belong in optional source details, not the primary editing hierarchy.
+Persona management is one list with editing only. Agent chooses its persona. Editing a shared persona must identify its impact on bound Agents and retain the independent save boundary. Sender authorization assigns one fixed state to one or more exact sender IDs. State permissions are read-only and come from the shared contract. Tool and resource selection remains separate from those permissions.
+
+Agent and persona binding publication checks both revisions atomically. Show the actual change scope and runtime interruption impact before publication. Preserve other objects' unfinished drafts, including temporarily invalid field values. Authentication expiry retains current edits while requesting login again. Never silently select a different object when a requested ID no longer exists.
+
+Runtime configuration, independent resource saves and immediate actions have explicit boundaries. Use confirmed outcomes for completion messages. A connected management service does not imply a connected IM adapter, and a format check does not establish network connectivity.
+
+## Tools and execution
+
+Group general tools separately from platform-specific capabilities. Build the directory from actual registration and injection rules. Show the source, applicability and minimum runtime state; unsupported capabilities must not appear as usable switches. MCP tools are discovered at runtime rather than guessed from names.
+
+The minimum state for a command tool does not imply complete Shell access. Restricted command names, syntax and download bounds are read from `packages/contracts/src/command-policy.ts`. Ordinary and senior states use the restricted container runner; full Shell and terminal input require the high senior state. Approval cannot widen the assigned state or command policy.
+
+Model draft testing uses the real engine with an isolated session. It does not execute tools, read production memory or deliver IM messages. Explain these limits and possible model charges beside the test controls.
+
+## Clear copy
+
+Use short sentences, one topic per sentence and concrete verbs. Keep terminology consistent: configuration draft, publish, format check, connection status. Field help explains purpose, input and effective time only when needed. Errors identify the field and next action without echoing submitted values. Show permissions, charges and interruption effects directly; place protocol detail and limits in expandable help.
+
+This Chinese interface borrows clear-writing principles from STE; it does not claim English STE conformance.
+
+## Source and type boundaries
+
+Shared DTOs and schemas live at root `packages/contracts/src`. External JSON is `unknown` until validated. Use explicit DOM narrowing and strong application types. The active workbench rejects `any`, unchecked type assertions, non-null escapes and typecheck bypass comments. Management tokens stay in memory; login state uses the server's HttpOnly session cookie.
+
+`src/components/typescript` and `/api/ts` retain their compatibility names; they are code/API identifiers, not the former runtime directory. All source imports and test tooling resolve against the root `packages` and `node_modules` directories.
 
 ## Verification
 
-Inspect desktop and narrow/mobile breakpoints. Verify tab keyboard controls, draft preservation, form validation, previews, route ordering, resource navigation, execution filters and payload expansion. Inspect the packaged app, not only source or a static mock. Keep runtime labels truthful: a healthy HTTP service does not imply that every IM connection is online.
+Run `npm run build:dashboard` and `npm run test:dashboard` from the repository root. The frontend build performs the strict workbench gate and Vue typechecking. Logic tests cover navigation, unsaved drafts, typed API errors, sender groups, command-policy display and object publication.
+
+Browser checks use isolated data and must name their evidence limits. Check the selected object, tab switching, editing, publication scope, re-login recovery, platform workflow, desktop/mobile layout and console errors. HTTP success or build success alone is not visual verification. Keep historical smoke scripts in the archive; current browser scripts are `ts-browser-smoke-test.mjs` and `ts-live-smoke-test.mjs`.

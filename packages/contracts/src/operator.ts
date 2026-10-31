@@ -1,0 +1,11 @@
+import { z } from 'zod';
+export const ManagementSessionSchema = z.object({ authenticated: z.boolean(), expiresAt: z.number().optional() });
+export const AuditRecordSchema = z.object({ id: z.string(), timestamp: z.number(), action: z.string(), target: z.string(), outcome: z.enum(['success', 'failure']) });
+export const AuditResponseSchema = z.object({ records: z.array(AuditRecordSchema) });
+export const SecretNameSchema = z.string().regex(/^[A-Z_][A-Z0-9_]{0,127}$/);
+export const SecretsResponseSchema = z.object({ secrets: z.array(z.object({ name: SecretNameSchema, updatedAt: z.number() })) });
+export const WorkspaceEntrySchema = z.object({ name: z.string(), path: z.string(), kind: z.enum(['file', 'directory', 'symlink', 'other']), size: z.number(), modifiedAt: z.number() });
+export const WorkspaceListSchema = z.object({ environmentId: z.string(), path: z.string(), entries: z.array(WorkspaceEntrySchema), truncated: z.boolean() });
+export const WorkspaceTextSchema = z.object({ path: z.string(), text: z.string(), size: z.number() });
+export const WorkspaceEnvironmentListSchema = z.object({ environments: z.array(z.object({ id: z.string(), type: z.enum(['local', 'docker', 'sdk_docker']), root: z.string() })) });
+export type WorkspaceEntry = z.infer<typeof WorkspaceEntrySchema>;

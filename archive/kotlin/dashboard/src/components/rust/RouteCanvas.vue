@@ -1,0 +1,63 @@
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue';
+import type { Graph, GraphNode, Layout } from '../../api/rust';
+const labels: Record<string,string> = { input:'输入消息', condition:'条件分支', switch:'多路分支', transform:'文本变换', set_runtime_state:'选择运行态', command:'指令处理', agent:'调用 Agent', reply:'回复消息', rate_limit:'频率限制', deduplicate:'消息去重', memory_recall:'检索记忆', knowledge_retrieve:'检索知识库', end:'结束', legacy_normalize:'兼容旧消息' };
+const stateLabels: Record<string,string> = { operator:'普通干员', senior_operator:'资深干员', elite_operator:'高级资深干员' };
+const portLabels: Record<string,string> = { next:'继续', yes:'是', no:'否', error:'错误', handled:'已处理', unhandled:'未处理', denied:'拒绝', default:'默认' };
+const props = defineProps<{ graph: Graph; layout: Layout; catalog: any[]; states: string[]; agents: string[]; traces?: any[] }>();
+const emit = defineEmits<{ change: [graph: Graph, layout: Layout] }>();
+const selected = ref(''); const connecting = ref<{ from: string; port: string } | null>(null); const zoom = ref(1);
+const history = ref<string[]>([]), future = ref<string[]>([]); const surface = ref<HTMLElement>();
+const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+const snapshot = () => JSON.stringify({ graph: props.graph, layout: props.layout });
+function commit(graph: Graph, layout = props.layout) { history.value.push(snapshot()); if (history.value.length > 100) history.value.shift(); future.value = []; emit('change', graph, clone(layout)); }
+function undo() { const v = history.value.pop(); if (!v) return; future.value.push(snapshot()); const s = JSON.parse(v); emit('change', s.graph, s.layout); }
+function redo() { const v = future.value.pop(); if (!v) return; history.value.push(snapshot()); const s = JSON.parse(v); emit('change', s.graph, s.layout); }
+watch(() => props.graph.id, () => { history.value = []; future.value = []; selected.value = ''; connecting.value = null; });
+const node = computed(() => { const n = props.graph.nodes.find(n => n.id === selected.value); return n ? { ...(props.catalog.find(c => c.kind === n.type)?.defaults || {}), ...n } as GraphNode : undefined; });
+const positions = computed(() => Object.fromEntries(props.graph.nodes.map((n, i) => [n.id, props.layout[n.id] || { x: 40 + (i % 4) * 230, y: 50 + Math.floor(i / 4) * 220 }])));
+function ports(n: GraphNode): string[] { if (n.type === 'switch') return [...(n.cases || []).map((_: unknown, i: number) => `case_${i}`), 'default']; return props.catalog.find(c => c.kind === n.type)?.ports || []; }
+function add(template: any) { const graph = clone(props.graph); const id = `${template.kind}_${crypto.randomUUID().slice(0, 8)}`; graph.nodes.push({ id, ...clone(template.defaults) }); commit(graph, { ...props.layout, [id]: { x: 40, y: 50 + graph.nodes.length * 35 } }); selected.value = id; }
+function remove() { const graph = clone(props.graph); graph.nodes = graph.nodes.filter(n => n.id !== selected.value); graph.edges = graph.edges.filter(e => e.from !== selected.value && e.to !== selected.value); commit(graph); selected.value = ''; }
+function update(key: string, value: any) { const graph = clone(props.graph); const n = graph.nodes.find(n => n.id === selected.value); if (n) { n[key] = value; commit(graph); } }
+const jsonError = ref('');
+function updateJson(key: string, value: string) { try { update(key, JSON.parse(value)); jsonError.value = ''; } catch { jsonError.value = `${key} 需要有效 JSON`; } }
+function connect(to: string) { if (!connecting.value || connecting.value.from === to) return; const graph = clone(props.graph); const c = connecting.value; graph.edges = graph.edges.filter(e => !(e.from === c.from && e.port === c.port)); graph.edges.push({ ...c, to }); commit(graph); connecting.value = null; }
+let drag: { id: string; x: number; y: number; position: { x: number; y: number }; before: string } | undefined;
+function start(event: PointerEvent, id: string) { if (event.button !== 0) return; selected.value = id; drag = { id, x: event.clientX, y: event.clientY, position: { ...positions.value[id] }, before: snapshot() }; (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); }
+function move(event: PointerEvent) { if (!drag) return; const layout = clone(props.layout); layout[drag.id] = { x: Math.max(0, drag.position.x + (event.clientX - drag.x) / zoom.value), y: Math.max(0, drag.position.y + (event.clientY - drag.y) / zoom.value) }; emit('change', props.graph, layout); }
+function end() { if (drag && snapshot() !== drag.before) { history.value.push(drag.before); future.value = []; } drag = undefined; }
+function key(event: KeyboardEvent) { if ((event.target as HTMLElement).matches('input,textarea,select')) return; if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); } else if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); remove(); } else if (event.key === 'Escape') connecting.value = null; else if (node.value && event.key.startsWith('Arrow')) { event.preventDefault(); const p = positions.value[node.value.id]; const delta = event.shiftKey ? 50 : 10; commit(props.graph, { ...positions.value, [node.value.id]: { x: Math.max(0, p.x + (event.key === 'ArrowRight' ? delta : event.key === 'ArrowLeft' ? -delta : 0)), y: Math.max(0, p.y + (event.key === 'ArrowDown' ? delta : event.key === 'ArrowUp' ? -delta : 0)) } }); } }
+function edgeStart(e: Graph['edges'][number]) { const a = positions.value[e.from]; const n = props.graph.nodes.find(n => n.id === e.from); const index = n ? ports(n).indexOf(e.port) : 0; return { x: a?.x + 190, y: a?.y + 45 + Math.max(0,index) * 24 }; }
+function path(e: Graph['edges'][number]) { const a = edgeStart(e), b = positions.value[e.to]; if (!positions.value[e.from] || !b) return ''; return `M ${a.x} ${a.y} C ${a.x + 85} ${a.y}, ${b.x - 85} ${b.y + 35}, ${b.x} ${b.y + 35}`; }
+function autoLayout() { const levels:Record<string,number> = {}; const remaining = new Set(props.graph.nodes.map(n => n.id)); for (let pass=0;pass<props.graph.nodes.length;pass++) for (const id of [...remaining]) { const incoming=props.graph.edges.filter(e=>e.to===id); if (incoming.every(e=>!remaining.has(e.from))) {levels[id]=Math.max(0,...incoming.map(e=>(levels[e.from]||0)+1));remaining.delete(id);} } const rows:Record<number,number>={}; const layout:Layout={}; for (const n of props.graph.nodes) {const level=levels[n.id]||0; const row=rows[level]||0;rows[level]=row+1;layout[n.id]={x:40+level*260,y:50+row*230};} commit(props.graph,layout); zoom.value=.7; }
+const walked = computed(() => new Set((props.traces || []).map(t => t.node_id)));
+</script>
+<template>
+  <div class="canvas-editor" @keydown="key">
+    <aside class="palette"><h3>添加节点</h3><button v-for="item in catalog" :key="item.kind" @click="add(item)">＋ {{ labels[item.kind] || item.kind }}</button></aside>
+    <div class="drawing"><div class="tools"><button :disabled="!history.length" @click="undo">撤销</button><button :disabled="!future.length" @click="redo">重做</button><button @click="autoLayout">自动布局</button><label>缩放 <input v-model.number="zoom" aria-label="画布缩放" type="range" min="0.4" max="1.5" step="0.1"></label><span>{{ connecting ? `连接 ${connecting.from}.${connecting.port} → 点击目标输入` : '拖动节点；选择输出端口后点击目标输入' }}</span></div>
+      <div ref="surface" class="viewport" tabindex="0" aria-label="路由图画布，方向键移动选中节点，Delete 删除，Command Z 撤销">
+        <div class="world" :style="{ transform: `scale(${zoom})` }"><svg width="2400" height="1800" aria-label="节点连线"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" /></marker></defs><g v-for="(edge, index) in graph.edges" :key="index"><path :d="path(edge)" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#arrow)" /><text v-if="positions[edge.from]" :x="positions[edge.from].x + 200" :y="edgeStart(edge).y - 7">{{ portLabels[edge.port] || edge.port }}</text></g></svg>
+          <article v-for="n in graph.nodes" :key="n.id" class="route-node" :class="{ selected: selected === n.id, walked: walked.has(n.id) }" :style="{ left: `${positions[n.id].x}px`, top: `${positions[n.id].y}px` }" tabindex="0" @focus="selected = n.id">
+            <header @pointerdown="start($event, n.id)" @pointermove="move" @pointerup="end" @lostpointercapture="end">{{ labels[n.type] || n.type }} <small v-if="graph.entry === n.id">入口</small></header>
+            <small>{{ n.id }}</small><div v-if="n.state" class="state">{{ stateLabels[n.state] || n.state }}</div><div v-if="n.agent_id">Agent: {{ n.agent_id }}</div>
+            <div class="ports"><button :aria-label="`连接到 ${n.id}`" @click="connect(n.id)">● 输入</button><button v-for="port in ports(n)" :key="port" :aria-label="`${n.id} 输出 ${port}`" @click="connecting = { from: n.id, port }">{{ portLabels[port] || port }} ●</button></div>
+          </article>
+        </div>
+      </div>
+    </div>
+    <aside class="inspector"><h3>节点设置</h3><template v-if="node"><strong>{{ node.id }}</strong><button @click="commit({ ...graph, entry: node.id })">设为入口</button>
+      <label v-for="(value, field) in node" v-show="!['id', 'type'].includes(String(field))" :key="field">{{ field }}
+        <select v-if="field === 'state'" :value="value" @change="update(String(field), ($event.target as HTMLSelectElement).value)"><option v-for="state in states" :key="state" :value="state">{{ stateLabels[state] || state }}</option></select>
+        <select v-else-if="field === 'agent_id'" :value="value || ''" @change="update(String(field), ($event.target as HTMLSelectElement).value || null)"><option value="">选择 Agent</option><option v-for="agent in agents" :key="agent">{{ agent }}</option></select>
+        <input v-else-if="typeof value === 'boolean'" type="checkbox" :checked="value" @change="update(String(field), ($event.target as HTMLInputElement).checked)">
+        <input v-else-if="typeof value === 'number'" type="number" :value="value" @change="update(String(field), Number(($event.target as HTMLInputElement).value))">
+        <input v-else-if="typeof value === 'string'" :value="value" @change="update(String(field), ($event.target as HTMLInputElement).value)">
+        <textarea v-else :value="JSON.stringify(value, null, 2)" rows="5" @change="updateJson(String(field), ($event.target as HTMLTextAreaElement).value)" />
+      </label><p role="alert">{{ jsonError }}</p><button class="danger" @click="remove">删除节点及连线</button><h4>输出连线</h4><div v-for="(e, i) in graph.edges" :key="i"><template v-if="e.from === node.id">{{ e.port }} → {{ e.to }} <button @click="commit({ ...graph, edges: graph.edges.filter((_, j) => i !== j) })">移除</button></template></div></template><p v-else>选择一个节点查看配置。端口来自 Rust 服务端节点定义。</p></aside>
+  </div>
+</template>
+<style scoped>
+.canvas-editor{display:grid;grid-template-columns:170px minmax(350px,1fr) 250px;gap:12px;min-height:640px}.palette,.inspector{border:1px solid #cbd5e1;border-radius:10px;padding:12px;overflow:auto;max-height:800px}.palette button{display:block;width:100%;text-align:left;margin:5px 0}.tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px}.viewport{height:680px;overflow:auto;border:1px solid #cbd5e1;background:radial-gradient(#cbd5e1 1px,transparent 1px);background-size:20px 20px;border-radius:10px}.world{position:relative;width:2400px;height:1800px;transform-origin:0 0}.world svg{position:absolute;color:#64748b}.world text{font-size:11px;fill:#475569}.route-node{position:absolute;width:190px;background:#fff;color:#0f172a;border:1px solid #94a3b8;border-radius:8px;padding:0 8px 8px;box-shadow:0 3px 9px #0001}.route-node header{cursor:grab;touch-action:none;background:#e2e8f0;margin:0 -8px 6px;padding:8px;border-radius:7px 7px 0 0}.route-node small{font-size:10px;overflow-wrap:anywhere}.selected{outline:3px solid #2563eb}.walked{border:3px solid #0d9488}.ports{display:flex;gap:4px;flex-wrap:wrap;margin-top:10px}.ports button{font-size:11px}.inspector label{display:block;margin-top:12px}.inspector input:not([type=checkbox]),.inspector select,.inspector textarea{width:100%;box-sizing:border-box}.state{font-size:12px;color:#6d28d9}.danger{color:#b91c1c;margin-top:15px}button,input,select,textarea{font:inherit}button{padding:6px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;color:#1e293b;cursor:pointer}button:disabled{opacity:.45;cursor:default}button:focus-visible{outline:3px solid #2563eb}@media(max-width:1100px){.canvas-editor{grid-template-columns:130px 1fr}.inspector{grid-column:1/-1;max-height:none}}
+</style>

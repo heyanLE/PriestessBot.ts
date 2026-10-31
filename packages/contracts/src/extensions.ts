@@ -1,0 +1,14 @@
+import { z } from 'zod';
+import { CapabilitySchema } from './index.js';
+const Name = z.string().regex(/^[a-z][a-z0-9_]{1,63}$/);
+export const ExtensionFieldSchema = z.discriminatedUnion('type', [z.object({ type: z.literal('string'), description: z.string().max(500), maxLength: z.number().int().min(1).max(10000).default(2000) }).strict(), z.object({ type: z.literal('number'), description: z.string().max(500) }).strict(), z.object({ type: z.literal('boolean'), description: z.string().max(500) }).strict()]);
+export const ExtensionValuesSchema = z.record(z.string(), z.union([z.string(), z.number().finite(), z.boolean()]));
+export const ExtensionOperationSchema = z.object({ name: Name, description: z.string().min(1).max(1000), capabilities: z.array(CapabilitySchema).min(1), parameters: z.record(Name, ExtensionFieldSchema) }).strict();
+export const ExtensionManifestSchema = z.object({ id: Name, name: z.string().min(1).max(100), version: z.string().min(1).max(50), description: z.string().max(2000), configuration: z.record(Name, ExtensionFieldSchema).default({}), tools: z.array(ExtensionOperationSchema).max(30), commands: z.array(ExtensionOperationSchema).max(30) }).strict();
+export type ExtensionManifest = z.infer<typeof ExtensionManifestSchema>;
+export type ExtensionOperation = z.infer<typeof ExtensionOperationSchema>;
+export const ExtensionRecordSchema = z.object({ manifest: ExtensionManifestSchema, modulePath: z.string().min(1), configuration: ExtensionValuesSchema.default({}), enabled: z.boolean(), status: z.enum(['disabled', 'enabled', 'failed']), diagnostic: z.string(), revision: z.number().int(), updatedAt: z.number() }).strict();
+export type ExtensionRecord = z.infer<typeof ExtensionRecordSchema>;
+export const ExtensionsResponseSchema = z.object({ extensions: z.array(ExtensionRecordSchema) });
+export const ExtensionInstallSchema = z.object({ manifest: ExtensionManifestSchema, modulePath: z.string().min(1), trustedHostAcknowledged: z.literal(true), configuration: ExtensionValuesSchema.default({}) }).strict();
+export const ExtensionToggleSchema = z.object({ enabled: z.boolean(), expectedRevision: z.number().int(), configuration: ExtensionValuesSchema.optional() }).strict();

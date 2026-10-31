@@ -1,0 +1,31 @@
+{
+  "verifiedAt": "2026-10-25T07:33:39.513Z",
+  "image": "priestess-ts:integration",
+  "imageId": "sha256:571bbf3ca33a15412c032934653e483c24d3c6e6c71a2b86dc9059de2d591c67",
+  "imageOs": "linux",
+  "imageArchitecture": "arm64",
+  "native": {
+    "platform": "linux",
+    "arch": "arm64",
+    "node": "v22.22.2",
+    "sqlite": "3.51.2",
+    "rows": 1,
+    "pty": "LINUX_PTY_CONFIRMED"
+  },
+  "health": {
+    "status": "ok",
+    "runtime": "priestess-ts",
+    "engine": "agents_sdk"
+  },
+  "checks": {
+    "management401": true,
+    "dashboardHtml": true,
+    "dashboardAsset": true,
+    "noImConsumers": true,
+    "sqliteNative": true,
+    "linuxPty": true,
+    "apiMemorySurvivesRestart": true,
+    "sqliteSurvivesRestart": true
+  },
+  "scope": "Local Docker release qualification; no external production deployment and no live IM messages."
+}

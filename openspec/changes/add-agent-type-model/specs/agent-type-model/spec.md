@@ -25,7 +25,7 @@ The system SHALL describe every Agent by a registered type rather than by a beha
 
 ### Requirement: Agent capability is declared as a set and enforced at activation
 
-An Agent type SHALL declare its accepted LLM wire protocols and accepted tool-injection modes as sets. The system SHALL reject, before activation, any configuration that selects a protocol or an injection mode outside the target type's declared sets, naming the Agent, the route where applicable, and the offending value. A capability declared by a type SHALL be treated as an intent, and an external engine SHALL validate that intent against the engine binary it actually starts.
+An Agent type SHALL declare its accepted LLM wire protocols and accepted tool-injection modes as sets. The system SHALL reject, before activation, any configuration that selects a protocol or an injection mode outside the target type's declared sets, naming the Agent, the route where applicable, and the offending value. A capability declared by a type SHALL be treated as an intent, and an external engine SHALL validate that intent against the loaded native engine it actually uses.
 
 #### Scenario: Unsupported protocol is rejected
 - **WHEN** an Agent references a connection whose wire protocol is not in its type's accepted protocol set
@@ -37,7 +37,7 @@ An Agent type SHALL declare its accepted LLM wire protocols and accepted tool-in
 - **THEN** activation SHALL fail naming the route, the Agent and the mode
 
 #### Scenario: A declared capability is not proof
-- **WHEN** an Agent type declares an injection mode that depends on a mechanism the engine binary does not provide
+- **WHEN** an Agent type declares an injection mode that depends on a mechanism the loaded native engine does not provide
 - **THEN** the engine SHALL detect the mismatch when it starts and fail with an actionable message
 - **AND** it SHALL NOT accept the configuration claim as sufficient
 
@@ -83,6 +83,45 @@ The system SHALL allow a connection's protocol to be consumed either by the inte
 - **WHEN** an external engine needs the connection's credential
 - **THEN** it SHALL receive it through a single audited resolution path at process start
 - **AND** the secret SHALL NOT appear in engine configuration files, logs, or any API model
+
+### Requirement: External-engine turns preserve conversation ownership and caller authorization
+
+An external Agent SHALL use isolated, persistent engine state for that Agent and SHALL map each `(workspaceId, agentId, platformId, sessionId)` conversation to its own engine thread. It SHALL resume that thread instead of replaying the local transcript. Concurrent messages for one thread SHALL be serialized. Each server-initiated tool or approval request SHALL be tied to the live originating turn and its caller permission, and an unknown or stale request SHALL fail closed.
+
+#### Scenario: Codex is packaged with the existing application
+- **WHEN** an Agent selects the CODEX engine
+- **THEN** PriestessBot SHALL load the pinned Codex JNI library and call the Rust engine in process
+- **AND** it SHALL NOT require a second network service or exposed port
+
+#### Scenario: A conversation continues in its engine thread
+- **WHEN** a later message enters the same Agent and IM session
+- **THEN** the external engine SHALL resume that conversation's thread
+- **AND** it SHALL NOT replay previously processed messages or tool calls
+
+#### Scenario: Tool requests arrive during an active turn
+- **WHEN** the engine requests a dynamic tool before the turn completes
+- **THEN** the host SHALL dispatch it using the originating turn's filtered tools and permission group
+- **AND** the host SHALL respond without waiting for the turn to complete first
+
+#### Scenario: A route or caller changes the allowed tools
+- **WHEN** a later turn for a stored engine thread has a different route-scoped or permission-scoped tool set
+- **THEN** the host SHALL update the thread's advertised tools if the pinned engine supports it, or rotate to a new thread with an explicit continuity diagnostic
+- **AND** the host SHALL NOT advertise or execute a broader tool set retained from an earlier turn
+
+#### Scenario: A native engine turn fails before completion
+- **WHEN** the native engine reports a terminal error or shuts down before the turn completes
+- **THEN** the host SHALL fail that turn and release its pending requests
+- **AND** it SHALL NOT automatically replay a turn that may already have produced side effects
+
+#### Scenario: The Agent's provider credential changes
+- **WHEN** a new effective configuration changes the provider endpoint, protocol or resolved credential used by an external Agent
+- **THEN** later turns SHALL use a newly configured native engine generation
+- **AND** the host SHALL NOT keep assigning work to a generation carrying the previous credential
+
+#### Scenario: Agent instructions change after a thread starts
+- **WHEN** the effective instructions or persona change while a conversation has an engine thread
+- **THEN** the next turn SHALL use the new instructions through a supported thread-level update or a new thread with an explicit continuity diagnostic
+- **AND** it SHALL NOT silently retain stale instructions or add a duplicate prompt to every user turn
 
 ### Requirement: Tool injection is decided per IM route and scoped to its platform
 

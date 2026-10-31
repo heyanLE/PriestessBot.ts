@@ -1,0 +1,86 @@
+/* Object-centred Dashboard, based on the selected Priestess HTML prototype. */
+.ts-product-shell{background:var(--surface)}
+.ts-product-shell .shell-sidebar{width:216px;background:var(--nav)}
+.ts-product-shell .shell-main{margin-left:216px}
+.ts-product-shell .sidebar-frame{padding:26px 16px 20px;gap:16px}
+.ts-product-shell .shell-brand{padding:0 8px 16px;gap:11px}
+.ts-product-shell .shell-brand-mark{width:48px;height:48px;border-radius:9px}
+.ts-product-shell .shell-brand-copy strong{font-size:21px}
+.ts-product-shell .shell-brand-copy small{font-size:12px}
+.ts-product-shell .ts-nav-search{margin:0 5px 12px;gap:6px}
+.ts-product-shell .ts-nav-search>span{font-size:11px}
+.ts-product-shell .ts-nav-search input{font-size:12px;min-height:37px;background:rgba(255,255,255,.7)}
+.ts-product-shell .ts-primary-navigation{display:flex;flex-direction:column;gap:8px}
+.ts-product-shell .ts-primary-navigation .nav-link{font-size:16px;min-height:52px;margin:0;padding:12px 14px;gap:14px;border-radius:7px}
+.ts-product-shell .ts-primary-navigation .nav-link:last-child{margin-top:auto}
+.ts-product-shell .ts-primary-navigation .nav-link.is-current{background:var(--accent-soft);color:var(--accent-ink);box-shadow:inset 4px 0 var(--accent)}
+.ts-product-shell .sidebar-runtime{display:flex;align-items:center;gap:8px;padding:14px 8px 0;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+.ts-product-shell .ts-search-results .nav-link>span{display:grid;gap:3px}
+.ts-product-shell .ts-search-results small{font-size:11px;font-weight:400;color:var(--muted)}
+.ts-product-shell .shell-topbar{height:auto;min-height:126px;padding:24px 32px;border-bottom:1px solid var(--line);background:var(--surface);box-shadow:none;align-items:center}
+.ts-product-shell .topbar-page-meta h1{font-size:28px;margin:12px 0 0;letter-spacing:-.5px}
+.ts-product-shell .page-breadcrumb{font-size:13px;color:var(--muted);gap:10px}
+.ts-product-shell .topbar-actions{gap:18px}
+.ts-product-shell .connection-badge{padding:0;border:0;background:transparent;font-weight:400;gap:8px}
+.ts-product-shell .connection-badge small{font-size:11px;color:var(--muted)}
+.ts-product-shell .ts-quiet-button{border:0;background:transparent;font-weight:400;font-size:12px}
+.ts-product-shell .workspace{max-width:none;padding:26px 30px 40px;background:var(--surface);gap:20px;min-width:0}
+.ts-product-shell .ts-area-navigation{display:flex;gap:26px;align-items:center;flex-wrap:wrap;padding:0 30px;border-bottom:1px solid var(--line);background:var(--surface)}
+.ts-product-shell .ts-area-navigation a{padding:15px 2px 12px;border-bottom:3px solid transparent;color:var(--muted);font-size:14px;text-decoration:none;white-space:nowrap}
+.ts-product-shell .ts-area-navigation a.active{color:var(--accent-ink);border-bottom-color:var(--accent);font-weight:600}
+.ts-product-shell .ts-local-navigation{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.ts-product-shell .ts-local-navigation a{padding:7px 12px;font-size:13px;color:var(--muted);border-radius:6px;text-decoration:none}
+.ts-product-shell .ts-local-navigation a.active{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+.ts-product-shell .ts-context-help{font-size:12px;color:var(--muted);margin:0 0 20px}
+.ts-product-shell .ts-context-help>summary{font-size:12px}
+.ts-product-shell .ts-context-help>.panel{margin-top:12px;padding:16px;background:var(--surface-soft);border-radius:7px}
+.ts-product-shell .panel{box-shadow:none;border:0;padding:0;border-radius:0}
+.ts-product-shell .ts-config-summary{position:static;box-shadow:none;border:1px solid var(--line);background:var(--surface-soft);border-radius:7px;padding:14px 18px;gap:12px;margin:0;align-items:center}
+.ts-product-shell .ts-config-summary .config-revision{gap:4px}
+.ts-product-shell .ts-config-summary .config-revision>span{font-size:12px}
+.ts-product-shell .ts-config-summary .config-revision>small{font-size:12px}
+.ts-product-shell .ts-save-explanation{font-size:12px;margin:0;color:var(--muted)}
+.ts-product-shell .ts-save-explanation>summary{font-size:12px;font-weight:400;margin:0}
+.ts-product-shell .ts-save-explanation p{margin-top:9px}
+.ts-product-shell.is-agent-workspace .workspace{padding:0 0 32px;gap:0}
+.ts-product-shell.is-agent-workspace .shell-topbar{min-height:88px;padding-top:14px;padding-bottom:14px}
+.ts-product-shell.is-agent-workspace .topbar-page-meta h1{font-size:25px;margin-top:6px}
+.ts-product-shell.is-agent-workspace .workspace>.notice,.ts-product-shell.is-agent-workspace .ts-config-summary{margin:18px 28px 0}
+.ts-product-shell .ts-agent-page .agent-workbench{border:0;border-radius:0;background:var(--surface);color:var(--ink)}
+.ts-product-shell .ts-agent-page .agent-toolbar{padding:19px 28px}
+.ts-product-shell .ts-agent-page .publish-note{font-size:12px;line-height:1.6}
+.ts-product-shell .ts-agent-page .publish-button{background:var(--accent)!important;border-color:var(--accent)!important}
+.ts-product-shell .ts-agent-page .agent-tabs{padding:0 28px;gap:26px}
+.ts-product-shell .ts-agent-page .agent-tabs button{font-size:14px;padding:15px 0}
+.ts-product-shell .ts-agent-page .agent-editor{padding:28px}
+.ts-product-shell .ts-agent-page .agent-test{background:var(--surface-soft);border-color:var(--line);position:sticky;top:100px;height:max(440px,calc(100dvh - 280px));max-height:780px;min-height:0;align-self:start}
+.ts-product-shell .ts-agent-page .test-transcript{min-height:90px;max-height:none}
+.ts-product-shell .ts-agent-page .test-empty{min-height:140px;padding:12px}
+.ts-product-shell .ts-agent-page .test-composer textarea{min-height:64px}
+.ts-product-shell .ts-agent-page .agent-workbench label{font-size:13px}
+.ts-product-shell .ts-agent-page .agent-workbench input:not([type=checkbox]),.ts-product-shell .ts-agent-page .agent-workbench textarea,.ts-product-shell .ts-agent-page .agent-workbench select{font-size:14px}
+.ts-product-shell .ts-agent-page .tool-state,.ts-product-shell .ts-agent-page .tool-row small,.ts-product-shell .ts-agent-page .platform-capabilities>summary span,.ts-product-shell .ts-agent-page .check-row small{font-size:11px}
+.ts-product-shell .ts-agent-page .tool-row{gap:12px}
+.ts-product-shell .ts-agent-page .tool-title{font-size:14px}
+.ts-product-shell .ts-resource-hub{display:grid;gap:0;max-width:1100px}
+.ts-product-shell .ts-resource-row{display:flex;align-items:center;gap:20px;padding:26px 5px;border-bottom:1px solid var(--line);text-decoration:none;color:var(--ink)}
+.ts-product-shell .ts-resource-row:hover{background:var(--surface-soft)}
+.ts-product-shell .ts-resource-row>svg{flex-shrink:0;color:var(--accent-ink)}
+.ts-product-shell .ts-resource-row>div{flex:1;min-width:0}
+.ts-product-shell .ts-resource-row h3{margin:0 0 6px;font-size:17px}
+.ts-product-shell .ts-resource-row p{font-size:13px;color:var(--muted)}
+.ts-product-shell .ts-resource-row>span{font-size:13px;color:var(--accent-ink);white-space:nowrap}
+.ts-product-shell .ts-execution-switch{justify-content:flex-end}
+.ts-product-shell .ts-welcome{background:transparent;padding:0 0 24px;border-bottom:1px solid var(--line);gap:20px}
+.ts-product-shell .ts-overview-grid{padding:22px 0;border-bottom:1px solid var(--line);gap:24px}
+.ts-product-shell .ts-stat{padding:10px 0;border:0;box-shadow:none}
+.ts-product-shell .ts-stat>strong{font-size:26px}
+.ts-product-shell .ts-publication-dialog{width:min(580px,calc(100vw - 32px));max-height:85vh;overflow:auto;padding:26px;border:1px solid var(--line);border-radius:12px;color:var(--ink);background:var(--surface);box-shadow:0 18px 70px rgb(20 60 40 / 16%)}
+.ts-product-shell .ts-publication-dialog::backdrop{background:rgb(23 46 41 / 38%)}
+.ts-product-shell .ts-publication-dialog .notice{margin:14px 0;font-size:13px}
+.ts-product-shell .ts-publication-scope{padding-left:21px;margin:20px 0;line-height:2;font-size:14px}
+.ts-product-shell .ts-publication-dialog footer{justify-content:flex-end;margin-top:24px}
+@media(max-width:1100px){.ts-product-shell .shell-sidebar{width:184px}.ts-product-shell .shell-main{margin-left:184px}.ts-product-shell .shell-brand-copy strong{font-size:18px}.ts-product-shell .shell-brand-mark{width:39px;height:39px}.ts-product-shell .sidebar-frame{padding:22px 12px 18px}.ts-product-shell .shell-topbar{padding:22px 26px}.ts-product-shell .workspace{padding:23px}.ts-product-shell .ts-area-navigation{padding:0 23px;gap:20px}}
+@media(max-width:1050px){.ts-product-shell .ts-agent-page .agent-test{position:static;height:auto;max-height:none;min-height:500px}.ts-product-shell .ts-agent-page .test-transcript{min-height:240px;max-height:450px}}
+@media(min-width:1051px) and (max-height:850px){.ts-product-shell .ts-agent-page .agent-test{padding-top:16px;padding-bottom:16px;gap:8px;overflow:auto}.ts-product-shell .ts-agent-page .test-transcript{min-height:60px;padding-top:0;padding-bottom:0}.ts-product-shell .ts-agent-page .test-empty{min-height:60px;padding:4px;gap:4px}.ts-product-shell .ts-agent-page .test-empty>svg,.ts-product-shell .ts-agent-page .test-empty>p{display:none}.ts-product-shell .ts-agent-page .test-composer textarea{height:60px;min-height:60px}}
+@media(max-width:760px){.ts-product-shell .shell-sidebar{width:232px}.ts-product-shell .shell-main{margin-left:0}.ts-product-shell .shell-topbar{min-height:100px;padding:18px 16px;gap:13px}.ts-product-shell .topbar-page-meta h1{font-size:24px;margin-top:8px}.ts-product-shell .topbar-actions{gap:6px;margin-left:auto}.ts-product-shell .connection-badge{display:none}.ts-product-shell .workspace{padding:20px 16px 30px}.ts-product-shell .ts-area-navigation{padding:0 15px;gap:10px 18px}.ts-product-shell .ts-area-navigation a{font-size:13px;padding:12px 0 10px}.ts-product-shell .ts-local-navigation{gap:5px}.ts-product-shell .ts-local-navigation a{font-size:12px;padding:7px 9px}.ts-product-shell .ts-config-summary{padding:14px;gap:12px}.ts-product-shell.is-agent-workspace .workspace>.notice,.ts-product-shell.is-agent-workspace .ts-config-summary{margin:15px 14px 0}.ts-product-shell .ts-agent-page .agent-toolbar{padding:18px 16px}.ts-product-shell .ts-agent-page .agent-tabs{padding:0 16px;gap:16px}.ts-product-shell .ts-agent-page .agent-tabs button{font-size:12px}.ts-product-shell .ts-agent-page .agent-editor{padding:22px 16px}.ts-product-shell .ts-resource-row{gap:13px;padding:22px 0;flex-wrap:wrap}.ts-product-shell .ts-resource-row>span{margin-left:38px}.ts-product-shell .ts-resource-row p{font-size:12px}.ts-product-shell .ts-publication-dialog{padding:20px}.ts-product-shell .ts-publication-dialog .section-title{align-items:flex-start}.ts-product-shell .ts-publication-dialog h2{font-size:18px}.ts-product-shell .ts-publication-dialog .section-title>button{flex-shrink:0}}

@@ -34,12 +34,12 @@ Pipeline ordering is not a constraint on the injection decision: `ImRouteStage` 
 - Separate protocol from vendor so a connection can state what it speaks and an Agent type can restrict what it accepts.
 - Make tool injection an explicit, route-scoped choice with a small, fixed vocabulary of shapes.
 - Give tools a place to hold configuration, with secrets referenced rather than stored.
-- Record the app-server findings that a later change must consume, so nothing verified is lost when the earlier proposals are removed.
+- Record the verified Codex source findings, including the public in-process Rust engine, so the JNI implementation has a pinned baseline.
 
 **Non-Goals:**
 
 - No runtime implementation. No new Kotlin type, no registry, no validator rule, no Dashboard control ships in this change.
-- No engine implementation. The `codex` engine is P5; this change records what is known about it and the one mechanism that must be spiked.
+- No engine implementation. The `codex` engine is P5; this change records the source-verified dynamic-tool mechanism and the native-library smoke check that must precede activation.
 - No changes to `agent-loop`, `pipeline` or `platform-abstraction` behaviour. Those deltas belong to P2 and P4.
 - No new injection shape beyond `NONE` / `SINGLE` / `MULTI` / `SKILL`.
 - No engine-native tool suppression, no per-agent credential override, no IM-side interactive approval UI.
@@ -79,7 +79,7 @@ The registry's completeness check upgrades from `AgentPresetRegistry`'s "every p
 
 Precedent: `ProviderMetadata` already carries `supportToolCalling / supportVision / supportStreaming` as static capability bits beside a registry (`provider/Provider.kt`), the same shape used by `PlatformRegistry` and `PluginProviderRegistration`.
 
-A declared capability is an *intent*, not a measured fact. For `CODEX` the tool-injection intent depends on the installed binary: dynamic tools require `initialize.capabilities.experimentalApi = true` and their wire shape changed during the 0.15x series. The engine therefore validates the intent against the actual binary at startup and fails fast outside a supported version range; the type descriptor is not trusted as proof.
+A declared capability is an *intent*, not a measured fact. For `CODEX`, P5 must verify the loaded native library exposes the pinned engine contract and complete a dynamic-tool round trip against a mock Responses endpoint. The type descriptor is not trusted as proof.
 
 ### 3. A provider connection has a vendor family and a wire protocol
 
@@ -104,7 +104,7 @@ A declared protocol is not a verified one. A connection can be configured for `O
 
 This asymmetry is why the protocol belongs on the connection rather than inside an adapter: one connection must be usable both as a `ChatProvider` source and as a raw engine endpoint, and the two paths must agree on what it speaks.
 
-Security consequence: the engine needs the *plaintext* secret in its child process environment, while `GuardedSecret.reveal()` (`config/model/EffectiveConfigModels.kt:108`) is deliberately internal and every API model opts into `redacted()`. The engine must receive it through one narrow, audited resolution path at process spawn — never by widening `GuardedSecret`, never by writing it into engine configuration files or logs. The existing proposal text "no secret is ever written to Codex's config file or logged" is adopted as a rule of the model, not of one engine.
+Security consequence: the engine needs the *plaintext* secret, while `GuardedSecret.reveal()` is deliberately internal and every API model opts into `redacted()`. Pass it through one audited, in-memory JNI call. The fork's custom provider supports `requires_openai_auth = false`, `wire_api = "responses"` and an explicit bearer token, so no Codex login is needed. Before enabling the engine, verify that runtime overrides containing the token do not reach rollout files, diagnostics or logs; if they do, add a dedicated ephemeral credential API in the native binding. Never widen `GuardedSecret` or write the secret into `config.toml`.
 
 ### 5. Tool injection is decided on the IM route, not on the Agent
 
@@ -144,11 +144,11 @@ Choosing to keep them means the runtime must deliver them, because Codex does no
 
 | Channel | Assessment |
 |---|---|
-| App-server developer/base-instructions field on `thread/start` / `turn/start` | **Chosen.** Persona is already merged into `instructions` by `PersonaMemoryInjector` before the runner sees it, so it travels with no extra machinery. Exact field name is pinned at P5 against the supported CLI version. |
+| `ThreadParams.developer_instructions` on `Engine::start_thread` and `Engine::resume_thread` | **Chosen default.** Persona is already merged into `instructions` by `PersonaMemoryInjector` before the runner sees it. Verify replacement semantics against the pinned engine; if it cannot replace instructions without losing history, start a new thread with an explicit continuity diagnostic. Do not prefix every user turn with a copy of the prompt. |
 | An `AGENTS.md` written into the Agent's `configDirectory` | Rejected as the primary channel: it snapshots persona to disk, needs rewriting on every persona change, and collides with the instruction-document semantics the harness preset already owns. |
 | Prefixing the first turn's text | Rejected: it pollutes conversation history and is not removable. |
 
-Skills converge here: the natural way to keep a priestess skill available to Codex is to map it to a Codex skill (`$name` plus a `skill` input item on `turn/start`), which is the same mechanism as the `SKILL` injection mode. The runtime therefore needs a defined skill-discovery root for the engine (a per-Agent `CODEX_HOME` or an extra skills root) — a P5 decision that P4's `SKILL` mode depends on.
+Skills converge here: map a priestess skill to a Codex skill input, the same mechanism as `SKILL` injection. For an existing authorized skill, pass its validated absolute `SKILL.md` path directly if the pinned Rust `UserInput` contract accepts it. Otherwise mount only authorized skills beneath the Agent's isolated home. The P5 adapter must verify refresh semantics and expose only skills authorized for the current Agent and caller.
 
 ### 9. Engine-native tools keep precedence; the boundary is disclosed, not enforced
 
@@ -163,6 +163,22 @@ Because suppression is rejected, two things become mandatory rather than optiona
 
 Every roster and matrix — Agent types, their protocol and injection capabilities, each connection's declared protocol, each platform's available actions and supported dispatcher shape — is reported by the server. The Dashboard filters and warns from that data and never duplicates a matrix in the frontend, so a new type or protocol cannot leave the two sides inconsistent.
 
+### 11. JNI calls the reference fork's Rust `Engine` in process
+
+At `codex_for_astrbot` revision `413f16a571a7a24557e70250c0284c5bebdd8c3f`, `codex-rs/astrbot-py` publishes `engine` as a Rust module and builds as both `rlib` and `cdylib`; the Python feature is optional. Its `Engine` already implements thread start/resume, turn submission, event polling, dynamic-tool responses, approval decisions, interruption and shutdown. P5 adds a small JNI `cdylib` around that public Rust module. PriestessBot remains the only server and starts no app-server process.
+
+The Kotlin boundary is `CodexNativeSession`, separate from `CodexExternalAgentRunner`. JNI exchanges bounded JSON payloads with Rust, mirroring the existing Python wrapper rather than mirroring every Codex protocol type in Kotlin. The native library owns a Tokio runtime with the fork's 16 MiB worker stack requirement. **Never call `Runtime::block_on` for Codex core operations on a JVM executor thread**: a real resume smoke crashed the JVM at its approximately 2 MiB stack guard. The bridge now dispatches core futures onto its 16 MiB Rust workers and waits for their results from JNI. Every exported native method catches Rust panics, reports a bounded error without echoing secrets, and uses a non-reused handle registry so `close()` cannot free an engine while another native call uses it. A fatal native fault can still terminate the JVM; CODEX is off by default and only locally opt-in with an explicit path and SHA-256 while NAS/production gates remain.
+
+Use one engine generation per active CODEX Agent home. Set `EngineOptions.codex_home` to `configDirectory/codex-home`, set `ThreadParams.cwd` to the Agent's `tempDirectory`, and use `no_environment = true` unless an explicit, separately reviewed native execution policy exists. With no `codex_self_exe`, the fork uses `EnvironmentManager::without_environments`; PriestessBot supplies tools through its own permission-aware dispatcher. Code mode may still require a helper process if enabled, so it is disabled for the first integration.
+
+Configure a custom provider with `wire_api = "responses"`, `requires_openai_auth = false`, the selected base URL, and an explicit bearer token. Do not call `login_api_key`: it persists an auth record in `CODEX_HOME`. Pass the resolved secret only through the audited native boundary. The fork currently accepts `experimental_bearer_token` in the provider config, but P5 must prove that runtime overrides do not serialize this value into rollout files or logs; otherwise extend the fork with an ephemeral provider-token API before allowing real credentials. A provider endpoint, protocol or credential change retires the old engine generation after bounded draining; later turns use a new generation.
+
+Persist a unique mapping keyed by `(workspaceId, agentId, platformId, sessionId)` to the Codex thread ID. Serialize turns for one mapping while independent conversations run concurrently. Resume the mapped thread instead of replaying PriestessBot's transcript. On each accepted turn, pass a freshly filtered `TurnRequest.dynamic_tools` set based on the matched route, enabled Agent tools and caller permission. The fork applies this through `ThreadSettingsOverrides.dynamic_tools`, so the declarations can be narrowed per turn without rotating the thread. The host callback still rechecks the live turn's policy; declarations alone are not authorization.
+
+Give each loaded thread one durable event pump that owns `Engine::next_event` until termination and queues events to Kotlin. Do not cancel a pending poll: the fork's Python wrapper warns that an event can otherwise be consumed and dropped. Tool and approval responses use separate JNI calls while the event pump runs. Register immutable caller authorization by `turnId`; reject unknown, stale, duplicate or cross-Agent calls. On cancellation call `Engine::interrupt`; on shutdown stop assigning work, interrupt active turns, drain with a deadline, then call `shutdown_thread` and `shutdown`. Never replay a turn that may already have produced side effects.
+
+The macOS arm64 native bridge has built and passed a mock Responses smoke: an isolated no-login engine completed a turn, answered a dynamic tool call through `ToolCase`, completed a second turn after the advertised tool set was narrowed to empty, and resumed a persisted rollout after an engine restart. The Kotlin supervisor persists conversation-to-rollout mapping, serializes one conversation and rotates the engine generation when its credential changes. A fake token was absent from the scanned Codex home while live and after shutdown. An explicit local experiment can register the runner after path/OS/CPU/SHA-256 checks; the NAS Linux build, concurrent-close/fault behavior, skill delivery and log-side credential audit remain before production activation.
+
 ## Capability matrices
 
 **Agent types (target state):**
@@ -173,29 +189,31 @@ Every roster and matrix — Agent types, their protocol and injection capabiliti
 | `DEEPSEEK_HARNESS` | `INTERNAL` | `HARNESS` | all adaptable | `NONE`, `SINGLE`, `MULTI`, `SKILL` | yes, plus the instruction document |
 | `CODEX` | `CODEX` | — | `OPENAI_RESPONSES` only | `NONE`, `SKILL` guaranteed; `SINGLE` / `MULTI` conditional on dynamic tools | yes, via the P5 delivery channel |
 
-The `CODEX` row is the one the spike must settle. `SINGLE` / `MULTI` depend on dynamic tools, which are experimental and unverified end to end; `SKILL` and `NONE` do not.
+The `CODEX` row is conditional on the pinned JNI bridge's dynamic-tool smoke. `SINGLE` / `MULTI` require the native tool-call path; `SKILL` and `NONE` do not. The fork's public engine exposes the relevant methods, but the packaged native artifact and selected model still need an end-to-end test.
 
 **Field validity per type** must be expressed by validation, not by silence: budgets and compression settings are inert for `CODEX`, and the type descriptor is where that is decided.
 
-## Preserved Evidence: the Codex engine (from the removed `add-codex-agent-type`)
+## Preserved Evidence: earlier app-server exploration (superseded by Decision 11)
 
-**Why app-server rather than `codex exec`.** `exec` — and the TypeScript SDK, which is a thin wrapper that spawns `codex exec --experimental-json` and exchanges JSONL — cannot satisfy three requirements: this runtime's tools cannot reach the model, this runtime's permission model cannot gate the engine's actions, and the engine's progress cannot be observed or interrupted with structure. Verified independently: the SDK's `ThreadOptions` exposes only fixed values (`sandboxMode`, `approvalPolicy`, `workingDirectory`, `skipGitRepoCheck`, `outputSchema`, …) with no registration or callback surface, and under `exec` an MCP tool call is auto-cancelled because the approval prompt reads EOF from a closed stdin — the only workaround also disables the read-only sandbox (openai/codex#24135).
+**Why not `codex exec`.** `exec` — and the TypeScript SDK, which wraps it — cannot register PriestessBot's dynamic tools or provide the required per-call permission callbacks. The historical app-server investigation below established a capable process protocol, but the reference fork's public in-process engine now provides a shorter integration path.
 
-**App-server surface, verified against `codex-cli 0.154.0-alpha.6.2`; npm `@openai/codex` was at 0.155.1 at analysis time.**
+**Historical app-server surface, checked against the referenced `codex_for_astrbot` source revision above. It is not the selected P5 transport.**
 
 ```
 codex app-server --help          # --listen stdio:// (default) | unix:// | ws://IP:PORT
 codex app-server generate-json-schema --experimental --out <dir>
 ```
 
-The generated bundle contained 159 client-request methods, 81 server notifications and 11 server-initiated requests, including:
+The relevant v2 contract contains client requests, notifications and server-initiated requests, including:
 
 ```
-DynamicToolSpec   { name, description, inputSchema }        # experimental
-ThreadStartParams { …, dynamicTools: [DynamicToolSpec] }
+DynamicToolSpec =
+  { type:"function", name, description, inputSchema, deferLoading? }
+  | { type:"namespace", name, description, tools:[{type:"function", …}] }
+ThreadStartParams { …, cwd, developerInstructions?, dynamicTools? }
 
 server request  item/tool/call   → { threadId, turnId, callId, tool, namespace?, arguments }
-host response   { success, contentItems: [{type:"inputText", text} | {type:"inputImage", imageUrl}] }
+host response   { success, contentItems: inputText | inputImage | inputAudio }
 
 server requests item/commandExecution/requestApproval
                 item/fileChange/requestApproval
@@ -203,13 +221,13 @@ server requests item/commandExecution/requestApproval
                 applyPatchApproval, execCommandApproval
 ```
 
-Dynamic tools and `item/tool/call` are gated behind `initialize.params.capabilities.experimentalApi = true`, and the identifiers were realigned with the Responses API after the version originally probed (openai/codex#12732, #20724, #27365). A verified mock-Responses turn captured Codex's own request: a ~17 KB `instructions` block plus its native tool list (`exec_command`, `write_stdin`, `request_user_input`, `view_image`, `multi_agent_v1`, `get_goal`, `create_goal`, `update_goal`, `web_search`) — which is the basis for Decision 9.
+The function/namespace union is important: a function carries a JSON Schema `inputSchema`; a namespace has a name, description and typed function members. `item/tool/call` is a server-initiated JSON-RPC request that arrives while a turn is active, not a notification polled after `turn/start` returns. Its `DynamicToolCallResponse` includes `success` and `contentItems` (text, image or audio); the test suite also covers failure output and content-item round-tripping. Dynamic tools require the experimental API capability. The official docs also confirm that declarations persist with a thread; route-specific visibility must be reconciled before each turn.
 
-**One mechanism is unverified.** Dynamic tools appear in the schema and the protocol documents them, but no end-to-end invocation was observed, and the sibling implementation in the DeepSeek Harness checkout (`packages/subagent/subagent-codex`, a working app-server client over 0.153.4: `initialize` → `thread/start` → `turn/start` → notifications → approvals → `turn/interrupt`) does not use them at all. P5 must begin with a spike that proves declaration, invocation and response round-trip before it is scoped as implementable.
+**Historical evidence.** At the referenced source revision, `codex-rs/app-server/tests/suite/v2/dynamic_tools.rs` exercises dynamic tool calls. The chosen JNI path instead needs its own engine-level mock Responses smoke and native packaging test.
 
-**Transport options for Kotlin.** A third-party Kotlin app-server client exists (CoKit, `io.github.vupoint.cokit`) and models approvals as typed handlers, but at analysis time it was `0.0.x`, tracked `codex-cli 0.146.0`, listed dynamic-tool-call handling as unimplemented roadmap, had no GitHub release, and was not resolvable from Maven Central. It is therefore not a consumable dependency today; the transport is either hand-written or CoKit is vendored, and either way it stays behind a thin adapter.
+**Transport decision.** Kotlin calls a JNI boundary and consumes events from a dedicated native pump. Keep the rest of Agent, pipeline and provider code independent of JNI-specific DTOs.
 
-**Operational constraints.** The engine binary is a new runtime dependency absent from the current image (a Node runtime is needed only if the TypeScript SDK is used; the native binary speaks both `exec` and `app-server` directly, and platform payloads exist for linux x64/arm64 and macOS). Codex expects a git repository by default while the Agent configuration directory generally is not one. The app-server protocol is experimental and has already made breaking changes, so a supported version range with a fail-fast message is required.
+**Operational constraints.** Bundle a pinned native library for each target OS and architecture. Verify library loading, Rust runtime shutdown and mock endpoint behavior on macOS and NAS Linux. The Agent home and thread working directory remain separate so persistent Codex state does not share the scratch tree.
 
 ## Preserved Decisions: runtime scope (from the removed `add-agent-runtime-scope`)
 
@@ -236,9 +254,10 @@ These decisions were reached in the superseded proposal and survive unchanged. T
 
 - **The umbrella over-promises.** This change ships no behaviour; its value is the model and the split. Mitigated by keeping P1–P5 independently valuable and by refusing to fold implementation into it.
 - **`CODEX` injection capability is conditional on an experimental mechanism.** If the P5 spike fails, `SINGLE` / `MULTI` are unavailable on Codex and only `SKILL` / `NONE` remain. The matrix states this up front rather than assuming the full set.
+- **JNI shares the JVM failure domain.** A native abort can terminate PriestessBot; the CODEX Agent type remains opt-in until the pinned library, caller-approval boundary and lifecycle smoke pass.
 - **`SINGLE` weakens validation and permission granularity.** Accepted, with the dispatcher owning argument validation and the policy key extended to address actions.
 - **Engine-native actions are outside `toolPolicy`.** Accepted and disclosed; not enforced, per Decision 9.
-- **Persona and skills for `CODEX` depend on a channel whose exact field name is not pinned.** Deferred to P5 with the channel chosen; the alternative channels are recorded so the decision is not reopened from scratch.
+- **Persona and skills for `CODEX` depend on the pinned engine's thread instruction and skill-loading behavior.** P5 must confirm replacement and skill refresh semantics before promising live updates.
 - **A declared protocol may not match the endpoint.** Validation cannot settle it without a billable probe; the declared protocol is reported and the limitation documented.
 - **Two capability axes can drift from reality** (a type claims a mode the engine cannot serve; the frontend shows a mode the server rejects). Mitigated by fail-fast engine validation and by server-reported rosters.
 
@@ -249,6 +268,9 @@ These decisions were reached in the superseded proposal and survive unchanged. T
 | Does the `preset → type` rename stay inside schema v3? | **Stays in v3 as an in-place rename**, with no schema version bump, consistent with v3's stated one-way development migration and with how the earlier v3 changes were applied. |
 | When do the implemented prerequisites get archived? | **Archived 2026-09-23** (`rebuild-agent-im-configuration`, `add-deepseek-harness-agent-type`), with the outstanding NAS deployment verification recorded in `tasks.md` as an operational item rather than a blocker. |
 | Is `add-openai-responses-provider` kept as a separate change? | **No.** P1 absorbs it and removes it when P1 is created; its Responses mapping and fidelity boundary are carried in `tasks.md` 3.6. |
+| Which field carries external-Agent instructions? | **`ThreadParams.developer_instructions` on start and resume.** Confirm replacement semantics against the pinned engine; do not repeat the text in every user turn by default. |
+| Where are Codex skills discovered? | **Under the Agent's isolated Codex home**, with only Agent-authorized skills exposed. P5 verifies how the pinned engine refreshes edited skills. |
+| What happens to unsupported route injection modes and native-tool overlap? | **Reject unsupported modes at activation; show capability overlap with a warning.** Decisions 2 and 9 define both behaviors. |
 
 Also confirmed during review and recorded as decisions above: the Agent type replaces the preset selection (D1); capability is declared as sets (D2); the provider gains a protocol axis (D3); injection is route-scoped (D5); the tool library supplies defaults with a per-Agent override (D7); `CODEX` retains instructions, persona and skills (D8); engine-native tools keep precedence and are disclosed rather than suppressed (D9).
 
@@ -256,7 +278,3 @@ Also confirmed during review and recorded as decisions above: the Agent type rep
 
 - Which of an Agent's remaining fields are retained, inert or forbidden for a `CODEX` Agent: `execution.maxSteps`, `context.compression`, `memory`, `mcpServerIds`? Instructions, persona and skills are already decided as retained.
 - Does the `SINGLE` dispatcher's policy key become `tool#action`, or an explicit `{tool, action}` pair?
-- Should a route be allowed to set an injection mode for an Agent type that supports none, as an inert default, or is that always a validation error?
-- Which app-server field carries developer instructions for the supported CLI version, and is `baseInstructions` needed in addition?
-- How is the skill root exposed to the engine — a per-Agent `CODEX_HOME`, an extra skills root, or a generated skill directory?
-- For a `CODEX` Agent, should the Dashboard hide injected tools whose capability overlaps an engine-native tool, or show them with an overlap warning?

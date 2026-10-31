@@ -3,7 +3,7 @@ import vue from '@vitejs/plugin-vue';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const backendPort = env.VITE_DASHBOARD_PORT || '18080';
+  const backendPort = env['VITE_TS_PORT'] || '8081';
   const backendUrl = `http://127.0.0.1:${backendPort}`;
 
   return {
@@ -11,6 +11,7 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       proxy: {
+        '/api/ts': backendUrl,
         '/api': backendUrl,
         '/health': backendUrl,
         '/ws': {

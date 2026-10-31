@@ -1,0 +1,9 @@
+import { z } from 'zod';
+import { ExampleDialogsSchema } from './index.js';
+const ApiBaseSchema = z.string().max(2048).refine(value => { try { const url = new URL(value); return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash; } catch { return false; } }, 'API base must be HTTP(S) without credentials, query or fragment');
+export const SearchConfigurationSchema = z.object({ enabled: z.boolean().default(false), provider: z.enum(['deepseek', 'tavily', 'brave']).default('deepseek'), apiBase: ApiBaseSchema.default('https://api.deepseek.com'), apiKeyEnv: z.string().regex(/^[A-Z_][A-Z0-9_]*$/).default('DEEPSEEK_SEARCH_API_KEY'), timeoutMs: z.number().int().min(1000).max(60_000).default(25_000), defaultCount: z.number().int().min(1).max(50).default(5), maxCount: z.number().int().min(1).max(50).default(10), maxContentChars: z.number().int().min(100).max(50_000).default(12_000) }).strict();
+export const SearchSettingsSchema = SearchConfigurationSchema.extend({ revision: z.number().int().nonnegative().default(0) });
+export type SearchConfiguration = z.infer<typeof SearchConfigurationSchema>;
+export type SearchSettings = z.infer<typeof SearchSettingsSchema>;
+export const SearchStatusSchema = z.object({ settings: SearchSettingsSchema, credentialConfigured: z.boolean(), fetchSupported: z.boolean(), tools: z.array(z.string()) });
+export const EffectivePromptSchema = z.object({ agentId: z.string(), source: z.enum(['persona_library', 'inline']), personaId: z.string().nullable(), personaName: z.string().nullable(), supplementalInstructions: z.string(), personaInstructions: z.string(), exampleDialogs: ExampleDialogsSchema, tools: z.array(z.string()), skills: z.array(z.string()).nullable(), customErrorMessage: z.string().nullable(), voicePrompt: z.string().nullable(), systemPrompt: z.string(), dynamicContextNote: z.string() });

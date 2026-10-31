@@ -1,0 +1,85 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import test from 'node:test';
+import { z } from 'zod';
+import { mapAstrBotXConfiguration, importAstrBotXDatabase, parseAstrBotXJson } from '../packages/core/src/astrbotx-migration.js';
+import { RuntimeStore } from '../packages/core/src/storage.js';
+import { ManagementService } from '../packages/core/src/management.js';
+import { validateConfiguration } from '../packages/core/src/flow.js';
+
+function source() { return { agent_runner: { config: { model: 'deepseek-flash', model_provider: 'deepseek', model_providers: [{ id: 'deepseek', base_url: 'https://api.deepseek.com/v1', api_key: 'source-model-secret', wire_api: 'responses' }], developer_instructions: 'Developer instruction', base_instructions: 'Base instruction', memory_enabled: false, memory_auto_consolidate: true, turn_timeout: 600, max_queued_turns: 5 } }, platform: [{ id: 'qq', type: 'aiocqhttp', enable: true, ws_reverse_token: 'reverse-secret' }], admins_id: ['1371735400'], platform_settings: { enable_id_white_list: true, id_whitelist: ['123', 'qq:FriendMessage:456'], wl_ignore_admin_on_group: true, wl_ignore_admin_on_friend: true, rate_limit: { time: 60, count: 0 } }, provider_settings: { enable: true, streaming_response: false }, permission_rules: [{ enabled: true, match: ['*'], persona_id: '菲亚梅塔' }] }; }
+const skills = { skills: { pdf: { active: true }, disabled: { active: false } } };
+const options = { target: '/srv/priestess/data', napcatWebsocketUrl: 'ws://127.0.0.1:10001' };
+await test('AstrBotX maps source provider, whitelist, privileges, queue, disabled memory and skills without exposing secrets', () => {
+  const mapped = mapAstrBotXConfiguration(source(), skills, { ...options, napcatToken: 'forward-secret' });
+  assert.equal(validateConfiguration(mapped.config).valid, true);
+  assert.equal(mapped.config.connections[0]?.protocol, 'chat_completions');
+  assert.equal(mapped.config.agents[0]?.instructions, 'Base instruction\n\nDeveloper instruction');
+  assert.equal(mapped.config.agents[0]?.budget.timeoutMs, 600_000);
+  assert.equal(mapped.config.agents[0]?.memoryExtraction.enabled, false);
+  assert.deepEqual(mapped.config.memoryLibraries, []);
+  assert.equal(mapped.config.flow.execution.perSessionQueueLimit, 5);
+  assert.equal(mapped.config.flow.acceptance.rateLimitCount, 0);
+  assert.deepEqual(mapped.config.flow.acceptance.allowlist.entries, [{ platform: 'qq', sessionType: 'group', sessionId: '123' }, { platform: 'qq', sessionType: 'private', sessionId: '456' }]);
+  assert.equal(mapped.config.grants[0]?.state, 'elite_operator');
+  assert.equal(mapped.config.grants[0]?.senderIds[0], '1371735400');
+  assert.equal(mapped.config.flow.delivery.stream, false);
+  assert.equal(mapped.personaId, '菲亚梅塔');
+  assert.deepEqual(mapped.activeSkills, ['pdf']);
+  assert.equal(mapped.config.skillLibraries[0]?.directory, '/srv/priestess/data/imported/active-skills');
+  assert.equal([...mapped.secrets.values()].includes('forward-secret'), true);
+  assert.equal([...mapped.secrets.values()].includes('reverse-secret'), false);
+  assert.equal(JSON.stringify(mapped.config).includes('secret'), false);
+  assert.equal(JSON.stringify(mapped.warnings).includes('source-model-secret'), false);
+  assert.deepEqual(parseAstrBotXJson('\uFEFF{"ok":true}'), { ok: true });
+});
+await test('AstrBotX fails closed on ambiguous whitelist, unknown enabled platform or skill path escape', () => {
+  const whitelist = source(); whitelist.platform_settings.id_whitelist = ['unknown-format'];
+  assert.throws(() => mapAstrBotXConfiguration(whitelist, skills, options), /ambiguous whitelist/);
+  const platform = source(); platform.platform[0] = { id: 'other', type: 'unsupported', enable: true, ws_reverse_token: '' };
+  assert.throws(() => mapAstrBotXConfiguration(platform, skills, options), /Unsupported enabled/);
+  assert.throws(() => mapAstrBotXConfiguration(source(), { skills: { '../escape': { active: true } } }, options), /Unsafe/);
+});
+await test('AstrBotX imports complete management history and persona examples while preserving senders and keeping SDK state empty', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'priestess-astrbotx-')); const legacy = join(directory, 'data_v4.db');
+  const db = new DatabaseSync(legacy); const date = '2026-10-17 07:11:16.361873';
+  db.exec(`CREATE TABLE personas(created_at TEXT,updated_at TEXT,persona_id TEXT,system_prompt TEXT,begin_dialogs TEXT,folder_id TEXT);
+CREATE TABLE persona_folders(created_at TEXT,updated_at TEXT,folder_id TEXT,name TEXT,parent_id TEXT);
+CREATE TABLE conversations(created_at TEXT,updated_at TEXT,conversation_id TEXT,platform_id TEXT,user_id TEXT,content TEXT,title TEXT);
+CREATE TABLE platform_sessions(created_at TEXT,updated_at TEXT,session_id TEXT,platform_id TEXT,creator TEXT,display_name TEXT,is_group INTEGER);
+CREATE TABLE platform_message_history(created_at TEXT,updated_at TEXT,id INTEGER,platform_id TEXT,user_id TEXT,sender_id TEXT,sender_name TEXT,content TEXT);
+CREATE TABLE preferences(scope TEXT,value TEXT);
+CREATE TABLE attachments(attachment_id TEXT,path TEXT,type TEXT,mime_type TEXT);`);
+  db.prepare('INSERT INTO personas VALUES(?,?,?,?,?,?)').run(date, date, '菲亚梅塔', 'Source persona', '["Example question","Example reply"]', 'folder');
+  db.prepare('INSERT INTO persona_folders VALUES(?,?,?,?,?)').run(date, date, 'folder', 'Source folder', null);
+  db.prepare('INSERT INTO conversations VALUES(?,?,?,?,?,?,?)').run(date, date, 'original-id', 'qq', 'qq:GroupMessage:123', JSON.stringify([{ role: 'user', content: 'Full content' }, { role: 'tool', content: 'not imported as user' }, { role: 'assistant', content: 'Full reply' }]), 'Source conversation');
+  db.prepare('INSERT INTO platform_sessions VALUES(?,?,?,?,?,?,?)').run(date, date, 'web-session', 'webchat', 'astrbot', 'Source web session', 0);
+  db.prepare('INSERT INTO platform_message_history VALUES(?,?,?,?,?,?,?,?)').run(date, date, 1, 'qq', 'qq:GroupMessage:123', 'actual-sender', 'Actual name', JSON.stringify({ type: 'user', message: [{ type: 'at', user_id: 'bot-id' }, { type: 'plain', text: 'Historical text' }, { type: 'image', attachment_id: 'image-id', filename: 'source.png' }] }));
+  db.prepare('INSERT INTO platform_message_history VALUES(?,?,?,?,?,?,?,?)').run(date, date, 2, 'webchat', 'web-session', 'bot', 'bot', JSON.stringify({ type: 'bot', message: [{ type: 'plain', text: 'Historical assistant' }] }));
+  db.prepare('INSERT INTO preferences VALUES(?,?)').run('codex', '{"threadId":"old-thread"}');
+  await mkdir(join(directory, 'attachments')); await writeFile(join(directory, 'attachments', 'source.png'), Buffer.from([137, 80, 78, 71]));
+  db.prepare('INSERT INTO attachments VALUES(?,?,?,?)').run('image-id', join(directory, 'attachments', 'source.png'), 'image', 'image/png');
+  db.prepare('INSERT INTO attachments VALUES(?,?,?,?)').run('unsafe-image', '/etc/passwd', 'image', 'image/png'); db.close();
+  const store = new RuntimeStore(join(directory, 'runtime.sqlite'));
+  try {
+    const counts = importAstrBotXDatabase(legacy, store, '菲亚梅塔', { sourceRoot: directory, originalSourceRoot: directory, targetRoot: join(directory, 'target') }); const manager = new ManagementService(store);
+    assert.equal(counts.personas, 1); assert.equal(counts.personaFolders, 1); assert.equal(counts.conversations, 1); assert.equal(counts.transcriptEntries, 2); assert.equal(counts.platformMessages, 2); assert.equal(counts.platformConversations, 2);
+    assert.equal(manager.personas()[0]?.instructions, 'Source persona');
+    assert.deepEqual(manager.personas()[0]?.exampleDialogs, [{ role: 'user', content: 'Example question' }, { role: 'assistant', content: 'Example reply' }]);
+    assert.equal(manager.bindings()[0]?.personaId, 'astrbotx:菲亚梅塔');
+    const original = manager.detail('astrbotx:conversation:original-id'); assert.equal(original.conversation.title, 'Source conversation'); assert.equal(original.conversation.archived, true); assert.equal(original.entries[0]?.senderId, 'unknown-source-sender'); assert.equal(original.entries[0]?.timestamp, Date.parse('2026-10-17T07:11:16.361Z'));
+    const messages = manager.conversations({ archived: 'all' }).flatMap(conversation => manager.detail(conversation.id).entries);
+    const explicit = messages.find(message => message.senderId === 'actual-sender'); assert.equal(explicit?.senderName, 'Actual name'); assert.deepEqual(explicit?.parts.slice(0, 2), [{ type: 'mention', userId: 'bot-id' }, { type: 'text', text: 'Historical text' }]);
+    assert.equal(counts.attachments, 1); assert.equal(counts.missingAttachments, 1);
+    const media = explicit?.parts[2]; assert.equal(media?.type, 'image');
+    const artifacts = store.list('artifacts', z.object({ id: z.string(), file: z.string() })); assert.equal(artifacts.length, 1);
+    assert.deepEqual(await readFile(artifacts[0]?.file ?? ''), Buffer.from([137, 80, 78, 71]));
+    if (media?.type === 'image') assert.equal(media.artifactId, artifacts[0]?.id);
+    assert.deepEqual(store.list('sdk-sessions', z.unknown()), []); assert.deepEqual(store.runs(), []);
+    assert.equal(store.list('astrbotx-archive-preferences', z.unknown()).length, 1);
+    const readonly = new DatabaseSync(legacy, { readOnly: true }); assert.equal(readonly.prepare('SELECT COUNT(*) AS count FROM conversations').get()?.count, 1); readonly.close();
+  } finally { store.close(); await rm(directory, { recursive: true, force: true }); }
+});

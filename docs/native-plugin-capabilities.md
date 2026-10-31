@@ -1,0 +1,81 @@
+# Native plugin capability matrix
+
+The native plugins use the TypeScript runtime's existing permissions, Agent tool mounts and approval settings. They are not a Python plugin compatibility layer. Upstream versions and licenses are pinned in [plugin attribution](plugin-attribution.md).
+
+## QQ group files and NapCat tools
+
+| Capability | Native support | Prerequisite or difference |
+| --- | --- | --- |
+| File and folder listing | `qq_file`, bounded pages with continuation cursors | Connected NapCat adapter; current group scope. Cursors are bound to group/source/folder. |
+| Group albums and album media | `qq_file` with `group_album`; protocol continuation plus within-page overflow | The connected NapCat version must expose `get_qun_album_list` and `get_group_album_media_list`. Nested media feeds are flattened. |
+| Filename search | `qq_search_files`; optional recursive traversal, visited-folder and result caps | Searches names, not file contents. Truncation is reported. |
+| File details and download URL | `qq_get_file_info`, `qq_get_file_download_url` | Detail lookup is within the selected folder; download URLs may be temporary. |
+| File upload | `qq_request_file_upload` from an authorized artifact or assigned workspace path | Runtime must provide a signed artifact URL reachable by NapCat. Arbitrary host paths and model-supplied URLs are not accepted. |
+| Delete file(s) and folder | `qq_delete_files`, `qq_delete_folder` | `external.write`, mounted tool, applicable per-tool approval and QQ bot rights. A folder deletion includes its contents. Batch cancellation/revocation stops further requests. |
+| Group members and group information | `qq_group_members`, `qq_group_info` | Member pagination, nickname/card/ID search and owner/admin/member filter/counts. |
+| Group announcements | `qq_group_notices`, `qq_publish_group_notice`, `qq_delete_group_notice` | Publish/delete additionally require write permission and QQ bot administrator rights. Errors are not reported as success. |
+| Group access configuration | Enabled state, all/allowlist/denylist and group IDs | Non-administrative calls are restricted to the current authenticated group. Cross-group or private-context requests require `resources.manage`. |
+| Uploaded-file processing | Ordered, enabled templates with group IDs, filename patterns, prompt and Skill library selection | Only normalized group-upload notices can match. Uses original sender identity and intersects Skills with the Agent's authorized resources. Normal route access controls still apply. |
+| Pattern matching | Bounded filename globs: `*` and `?` | Arbitrary upstream regex patterns require migration to globs; they are never executed as unbounded regular expressions. |
+| Transport and lifecycle | Existing NapCat HTTP/WebSocket connection, typed action allowlist, cancellation and protocol validation | Plugin disable, access changes and authorization are checked before each request and again after response. A cancelled write already sent to QQ can have an uncertain result; it is not automatically replayed. |
+
+Verification: six plugin tests cover scoped pagination, album cursors, role filtering, recursive bounds, original upload identity, authorization changes, mounted write tools, scoped upload resolution, per-tool approvals and a real loopback WebSocket cancellation/protocol fixture. Existing NapCat transport/protocol regression tests also pass. No real group write/delete operation is performed by these tests.
+
+## Markdown output processing
+
+| Capability | Native support | Prerequisite or difference |
+| --- | --- | --- |
+| Optional global cleanup | Removes headings/emphasis and expands links while retaining code, variable names, arithmetic and list markers | Defaults to off, matching the referenced global-cleanup setting. |
+| Newline controls | `segment_boundary`, `global`, `preserve` | Lists and indented continuation lines keep their breaks; deprecated list-merge length is not used. |
+| Table images | Local PNG rendering, green theme, bounded output | Matching Playwright Chromium headless shell and Linux system/font dependencies are required. |
+| Formula images | KaTeX produces local MathML; inline/block formulas outside code render with surrounding text | No CDN, remote scripts or external fonts. Simple currency expressions remain prose. |
+| Independent fallbacks | Table and formula each support `text`, `raw`, `remove` | Rendering failures return diagnostic warnings and apply the chosen fallback. Cancellation aborts instead of sending fallback content. |
+| Output limits | Render character cap, timeout, height cap and maximum images per reply | Excess content falls back according to configuration. |
+| Browser isolation | JavaScript disabled, requests blocked, offline context, CSP, raw HTML escaped, links/images made inert | Input content cannot choose an external browser navigation or fetch local/network resources. |
+| Rendering availability | Actual bounded browser launch/close, cached for 60 seconds | Reports a missing browser or dependency instead of pretending image rendering is ready. |
+| Native card renderer | `MarkdownPlugin.render` supports media summary cards independently of automatic decoration; classic green, compact minimal and dark cinematic poster layouts | These are native shared render themes, not one-to-one copies of upstream HTML/cover templates. Runtime publishes resulting bytes through its owned-artifact delivery flow. |
+
+Verification: six tests cover cleanup/code/list preservation, escaped/inert HTML and URLs, local MathML, per-type fallback, disabled passthrough, cancellation and actual PNG production. Local visual inspection confirmed Chinese text, table cells and formula baselines. The real-browser test reports an explicit prerequisite skip in environments without Chromium; it ran successfully in the development environment.
+
+Upstream-specific Codex private citation/directive stripping and its streaming-fragment state machine are not reproduced by this final-output decorator. Images are represented by ordered `[图 N]` markers plus image bytes so the host can place them in the final reply. This is final-output processing, not a token-by-token Markdown stream parser.
+
+## Bilibili video and resource plugin
+
+| Capability | Native support | Prerequisite or difference |
+| --- | --- | --- |
+| Nine upstream resource tools | `bilibili_search`, `bilibili_get_video_info`, `bilibili_get_video_content`, `bilibili_get_user_info`, `bilibili_get_live_room`, `bilibili_get_bangumi_info`, `bilibili_get_article`, `bilibili_get_music`, `bilibili_get_comments` | Typed normalized API fields, bounded responses and page limits. Selected metadata is returned, not arbitrary upstream JSON. |
+| Resource identifiers | BV/av/video links, ep episode resolution, ss/ep/md season details, cv/opus articles, au audio, UID/space/name lookup, live room/UID lookup | Short links follow at most three redirects and may resolve only to explicit Bilibili domains. Invalid URLs fail before sending credentials. |
+| Search authentication | WBI signing, cached nav signing keys; private server-side Cookie | Anonymous nav legitimately returns `-101` with WBI keys; this response is accepted only for that exact endpoint. API rate limits and access failures remain failures. |
+| Video content | Timestamped preferred Chinese subtitle; optional first available language; explicit subtitle/auto/ASR choice; selected video part; bounded text | Subtitle access is subject to Bilibili rights. No paywall bypass. Episode resolution requires a publicly resolvable BV record. |
+| ASR | Actual Bcut resource/create → bounded part PUTs → complete → task → result protocol; actual local-multimodal create_task → signed upload → start_task RPC | FFmpeg is required for downloaded DASH audio conversion. ASR is disabled by default, requires `external.write`, limits duration/bytes/time, and checks authority before every upload/task step. Public Bcut receives the audio. Local uploads must remain on the explicitly configured service origin. These protocols are fixture-tested; no live audio was uploaded during validation. |
+| Summary | Current host Agents SDK summary callback, source-only instructions, timestamps, style/length control, bounded source and per-owner/per-model cached result | Tool-free model execution; only given transcript is summarized. Transcript truncation is labelled. The callback must be connected by the host; no fake fallback summary. |
+| QR account login | Dashboard QR start/poll/logout and manager-only chat commands | Cookies and QR polling keys remain in private server storage. Status contains only booleans/source. Existing external Cookie secret is not deleted by QR logout. Account status indicates stored credentials, not ongoing proof that the account remains valid. No real account was logged in during automated tests. |
+| Natural commands | `/总结帮助`, `/总结`, `/重新总结`, `/最新视频`, `/B站登录`, `/B站登录状态`, `/B站登出`, `/订阅`, `/取消订阅`, `/订阅列表`, `/检查更新`, `/识别开关` | Configured per-tool approvals cannot be bypassed through commands. Approved subscription actions can run through `bilibili_subscribe` in the SDK. |
+| Link recognition | Optional bounded BV/video/short-link recognition and optional summary injected into current run context | Host receives data without replacing the original user request. The upstream concurrent progress-message pipeline and platform-specific mini-app JSON parsing are not cloned. |
+| Subscription polling | Persisted, owner-scoped opt-in subscriptions; baseline latest uploads, at most ten due subscriptions per tick and three newly discovered uploads per subscription; summaries to original conversation | Global auto push defaults off. Initial baseline avoids replaying old videos. The source's global cross-chat push-group/push-user override is deliberately not implemented. Latest-upload API checks ten videos; long gaps with more new uploads can miss older videos. |
+| Delivery and cancellation | Revalidates Agent, principal, role, grant revision and conversation generation; final callback checks enable/subscription state after rendering; attempt recorded before delivery | Uncertain sends are not replayed. Changing authorization/config revision or resetting a conversation requires re-subscribing. Disable, cancel, revocation and configured approval requirements prevent new scheduled sends. |
+| Cards | Shared native card renderer and text fallback | Exact upstream dark dual-column cover layout, mobile layout and arbitrary templates are not ported. No external browser requests. |
+| Content limits | Article HTML/plain text and primary Opus paragraph text/images/code; top-level comment pagination; music lyrics as returned by Bilibili | Full Opus nested list formatting, nested reply trees, optional live-anchor profile enrichment, all upstream statistic fields and automatic Python data/cookie-file migration are not included. Source Python code is never loaded. |
+
+Read-only primary API verification on 2026-10-26: Bilibili `/x/web-interface/nav` returned HTTP 200/code -101 with signing keys; `/x/web-interface/view?bvid=BV1xx411c7mD` returned HTTP 200/code 0 and a real video record. These checks do not establish account-specific subtitle, ASR, article, season-entitlement or write behavior. Network transport follows the host's provided fetch; Node's default fetch does not automatically inherit shell proxy environment variables.
+
+## Bangumi plugin
+
+| Capability | Native support | Prerequisite or difference |
+| --- | --- | --- |
+| Search/detail/calendar | Upstream names `search_bangumi_subject`, `get_bangumi_subject`, `get_bangumi_calendar` plus genre/tag filters and configured calendar timezone | Public api.bgm.tv access. Subject images/rating may be null in real calendar responses and are normalized accordingly. |
+| Episodes/characters/persons | `get_bangumi_episodes` with bounded offset; `get_bangumi_character`; `get_bangumi_person` | Public detail fields are normalized. Relationship graph traversal and person/character search are not exposed as separate tools. |
+| Public collections | `get_bangumi_collections` with bounded pagination | Configured account token is deliberately **not** sent for this read path, so ordinary users cannot retrieve the bot account's private collection through it. |
+| Account collection writes | `set_bangumi_collection` PATCH of the configured token account; state/comment/privacy fields | Requires stored token, `external.write`, `resources.manage`, mounted tool and SDK approval on every call. No real account mutation was performed for testing. |
+| Source commands | `/bgm`, `/bgm番剧`, `/bgm剧场版`, `/bgm漫画`, `/calendar`, `/today`, `/bgm模板`, `/追番`, `/弃坑`, plus `/追番列表` | Candidate selection is scoped to sender+conversation+Agent and expires in five minutes. Explicit `id:123` avoids ambiguity with selection numbers. Bangumi natural-language descriptions remain display data, not trusted instructions. |
+| Subscription management | `bangumi_subscribe` SDK tool plus commands; persisted baselines and original destination | Opt-in only. Each check currently considers the first 100 regular episodes; very long series should use manual paginated episode lookup. The upstream full user-facing subscription history UI is not cloned. |
+| Update checks | Checks episode air dates in configured timezone, deduplicates seen episode IDs, ten due subscriptions per tick | This reflects Bangumi's published schedule, not proof an episode is available on a streaming provider. The same revocation, reset, configuration revision, approval and uncertain-send rules as Bilibili apply. |
+| Cards and template selection | Shared native `classic`, `minimal`, `cinematic_poster` layouts; sender-scoped `/bgm模板` preference | Themes are implemented by the shared renderer and differ visually; upstream custom HTML files, image covers, remote rendering service and custom user template uploads are not copied. |
+
+Read-only primary API verification on 2026-10-26: direct Node fetch could not reach api.bgm.tv from the development host, while curl through its configured proxy succeeded. Real `/v0/subjects/328609` and `/calendar` bodies passed the production Zod normalization after adding the observed nullable image case: subject 328609, “孤独摇滚！”, seven calendar days and 112 items. This records a real network prerequisite rather than claiming default direct transport works on every machine.
+
+Media verification: 19 focused tests cover API normalization, timestamped content, scoped cache, WBI, QR secret redaction, URL rejection, response budgets, ACL and revocation, local/Bcut ASR protocol fixtures, source commands, collection token isolation/write gates, scoped subscription choices, persistence, approval bypass prevention, disable-before-send callback, uncertain delivery deduplication, and isolated proxy dispatch/credential handling. All tests use fake network/account writes and fake deliveries; the separate public API checks above are read-only.
+
+Bangumi NAS transport qualification (2026-10-26): the NAS resolver returned unrelated IPv4/IPv6 addresses and both direct TCP requests timed out. A read-only `curl --resolve` check against the three A records obtained through authenticated HTTPS DNS established TCP, then all three TLS handshakes were reset. Changing DNS alone therefore does not establish a working path. No persistent general-purpose proxy listener was found on the NAS. `proxyUrlSecret` now accepts a write-only secret reference to an HTTP(S) proxy; a per-plugin Undici dispatcher applies it only to api.bgm.tv, keeps proxy authentication away from upstream request headers, closes retired pools, and fails if an explicitly selected secret is absent. This requires a stable user-operated proxy reachable from the NAS; the deployment must not silently depend on the development Mac. Existing public credentials do not solve this network prerequisite.
+
+Other NAS read-only release checks reported by the integration run succeeded for the connected QQ/NapCat adapter, configured search service and Bilibili API. These successful checks are independent of the Bangumi network failure. No resolved public IP has been hard-coded into runtime configuration, and NAS global DNS, hosts and network services were left unchanged by the diagnostic work.

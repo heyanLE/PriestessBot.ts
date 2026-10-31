@@ -1,0 +1,3 @@
+import { z } from 'zod';
+export const BangumiSettingsSchema = z.object({ enabled: z.boolean().default(false), tokenSecret: z.string().max(100).default('BANGUMI_TOKEN'), proxyUrlSecret: z.string().max(100).default(''), autoPush: z.boolean().default(false), pollMinutes: z.number().int().min(5).max(1440).default(60), maxSubscriptions: z.number().int().min(1).max(100).default(20), timezone: z.string().max(80).default('Asia/Shanghai').refine(value => { try { new Intl.DateTimeFormat('en', { timeZone: value }); return true; } catch { return false; } }, 'Invalid time zone'), outputImage: z.boolean().default(false), template: z.enum(['classic', 'minimal', 'cinematic_poster']).default('classic') }).strict();
+export type BangumiSettings = z.infer<typeof BangumiSettingsSchema>;

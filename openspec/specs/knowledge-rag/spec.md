@@ -2,41 +2,55 @@
 
 ## Purpose
 TBD - created by archiving change knowledge-rag-foundation. Update Purpose after archive.
+
+> TypeScript requirements apply to runtime `priestess-ts`. Unmodified Kotlin/workspace-specific requirements below remain reference requirements for the legacy runtime.
+
 ## Requirements
 
 ### Requirement: Knowledge base persistence
-The system SHALL persist knowledge bases and text document chunks.
+The system SHALL persist knowledge libraries, source documents, versions, chunks, extraction provenance and ingestion status. Text, Markdown and PDF SHALL be initial supported imports.
 
 #### Scenario: Create and list knowledge bases
-- **GIVEN** an operator creates a knowledge base
-- **WHEN** knowledge bases are listed
-- **THEN** the created base is returned with id, name, description, and timestamps
+- **WHEN** an authorized operator creates a library
+- **THEN** it SHALL be returned with stable identity and metadata
 
 #### Scenario: Add text document
-- **GIVEN** a knowledge base exists
-- **WHEN** the operator adds a text document
-- **THEN** the document is split into one or more stored chunks
+- **WHEN** a valid text document is imported
+- **THEN** versioned chunks and source references SHALL be stored with observable indexing status
 
 ### Requirement: Keyword retrieval
-The system SHALL provide deterministic keyword retrieval over stored knowledge chunks subject to the resolved workspace memory policy.
+The system SHALL preserve deterministic sparse/keyword retrieval over only the libraries and documents allowed by the selected Agent and effective run authorization.
 
 #### Scenario: Query matches relevant chunk
-- **GIVEN** multiple chunks are stored
-- **WHEN** a query shares terms with one chunk
-- **THEN** that chunk is returned with a positive score
+- **WHEN** a query matches terms in an authorized chunk
+- **THEN** it SHALL be eligible for a positive sparse score
 
 #### Scenario: Limit search results
-- **GIVEN** several chunks match a query
-- **WHEN** a search limit is provided
-- **THEN** no more than that number of results is returned
+- **WHEN** a search requests a bounded result limit
+- **THEN** no more than the limit SHALL be returned
 
-#### Scenario: Workspace memory policy filters retrieval
-- **GIVEN** a workspace snapshot has a memory policy limiting accessible knowledge bases or memory scopes
-- **WHEN** an Agent in that workspace executes knowledge retrieval
-- **THEN** only records allowed by the workspace memory policy are searched
+#### Scenario: Scope filters retrieval
+- **WHEN** another library contains a highly matching but unauthorized chunk
+- **THEN** that chunk SHALL be excluded before results are exposed
 
-#### Scenario: Memory policy reload affects later retrieval
-- **GIVEN** a message pinned workspace snapshot version `N`
-- **WHEN** a reload publishes version `N+1` with changed memory policy
-- **THEN** retrieval for the in-flight message continues using version `N` memory policy
-- **AND** later messages use version `N+1` memory policy
+#### Scenario: Authorization changes
+- **WHEN** access is revoked before retrieval
+- **THEN** the request SHALL not read the revoked library even if an earlier configuration snapshot selected it
+
+### Requirement: Hybrid retrieval and index lifecycle
+Retrieval SHALL combine sparse and vector results with fusion and optional reranking. Indexes SHALL record embedding model/version/dimensions and support rebuild, failed-job retry and document deletion consistency.
+
+#### Scenario: Embedding changes
+- **WHEN** an embedding model or vector dimension changes
+- **THEN** incompatible indexes SHALL be rebuilt or rejected rather than queried as compatible
+
+#### Scenario: Document deletion
+- **WHEN** an authorized document deletion completes
+- **THEN** its chunks SHALL be removed from subsequent sparse/vector/reranked results and caches
+
+### Requirement: Source-rich retrieval results
+Knowledge results SHALL include library/document identity, version and available page/section references; extracted document content SHALL remain untrusted context.
+
+#### Scenario: PDF reference
+- **WHEN** a result comes from a parsed PDF page
+- **THEN** the result SHALL preserve the page and source document reference

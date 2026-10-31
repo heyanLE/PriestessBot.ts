@@ -3,20 +3,21 @@
 ## Purpose
 TBD - created while syncing archived changes. Update Purpose after archive.
 
+
+> TypeScript requirements apply to runtime `priestess-ts`. Unmodified Kotlin/workspace-specific requirements below remain reference requirements for the legacy runtime.
+
 ## Requirements
 
 ### Requirement: Sender permission groups
-The system SHALL resolve every accepted message sender into exactly one ordered permission group: `OPERATOR`, `ADMIN`, or `SUPER_ADMIN`, where `SUPER_ADMIN` exceeds `ADMIN` and `ADMIN` exceeds `OPERATOR`.
+The system SHALL resolve each accepted sender/session into operator, senior_operator or elite_operator using server-validated grants and state requests. The state SHALL be immutable for an active turn and SHALL not be shared with other group participants.
 
-#### Scenario: Configured super administrator wins
-- **GIVEN** a sender ID occurs in both configured administrator and super-administrator ID lists
-- **WHEN** the permission group is resolved
-- **THEN** the system assigns `SUPER_ADMIN`
+#### Scenario: Configured higher grant
+- **WHEN** a sender has a higher grant and requests a state within it
+- **THEN** that state SHALL apply to subsequent turns in that sender/session scope
 
-#### Scenario: Unconfigured sender is an operator
-- **GIVEN** a message sender ID occurs in neither configured administrator list
-- **WHEN** the permission group is resolved
-- **THEN** the system assigns `OPERATOR`
+#### Scenario: Unconfigured sender
+- **WHEN** no grant is configured for a sender
+- **THEN** the sender SHALL run as operator
 
 ### Requirement: Prefix command dispatch
 The system SHALL parse trimmed messages that begin with the configured nonempty command prefix and dispatch the command name and arguments to a registered command handler before Agent preprocessing.
@@ -35,42 +36,31 @@ The system SHALL parse trimmed messages that begin with the configured nonempty 
 - **AND** the pipeline proceeds to Agent preprocessing
 
 ### Requirement: Command authorization
-The system SHALL require a command's declared permission group before executing it and SHALL return a direct authorization response when the sender lacks that group.
+The system SHALL verify a command's required runtime state, capabilities and resource scope before execution and return a direct authorization result on denial.
 
 #### Scenario: Insufficient command permission
-- **GIVEN** a command requires `ADMIN`
-- **AND** the sender is an `OPERATOR`
-- **WHEN** the command is dispatched
-- **THEN** the handler does not execute
-- **AND** the response uses the resolved persona's permission-denied wording or the system default
-- **AND** no LLM request is made
+- **WHEN** an operator sender invokes a command requiring senior_operator
+- **THEN** the handler SHALL not execute and the persona/default denial SHALL be delivered without an LLM request
 
 ### Requirement: New conversation command
-The system SHALL provide a built-in `/new` command requiring `ADMIN` that clears persisted message history for the current platform and session without deleting the conversation identity.
+The built-in new/reset command SHALL require senior_operator or greater plus the conversation-reset capability, preserve business conversation identity, reset active history and invalidate the old engine/session generation.
 
-#### Scenario: Administrator starts a new conversation
-- **GIVEN** the current platform and session have persisted messages
-- **AND** the sender is an `ADMIN` or `SUPER_ADMIN`
-- **WHEN** the sender sends `/new`
-- **THEN** all persisted messages for that conversation are removed
-- **AND** the conversation record remains associated with the same platform and session
-- **AND** the success response is not persisted as history
+#### Scenario: Authorized reset
+- **WHEN** an authorized sender resets a conversation
+- **THEN** the old active history/thread mapping SHALL be detached from subsequent turns
+- **AND** late old-generation outputs SHALL not be delivered and the success acknowledgment SHALL not become normal history
 
-#### Scenario: Operator cannot start a new conversation
-- **GIVEN** the sender is an `OPERATOR`
-- **WHEN** the sender sends `/new`
-- **THEN** the persisted message history remains unchanged
-- **AND** the response is the configured permission-denied wording
+#### Scenario: Unauthorized reset
+- **WHEN** a sender without the required state/capability invokes reset
+- **THEN** history SHALL remain unchanged and the configured denial SHALL be returned
 
 ### Requirement: Persona-configured permission-denied wording
-The system SHALL persist an optional persona `permissionDenied` error message and SHALL use it for local command and Tool permission denials associated with that persona's workspace and primary agent.
+The system SHALL persist optional persona permissionDenied wording and use it for command and tool denials associated with the selected Agent.
 
 #### Scenario: Persona supplies denied wording
-- **GIVEN** the resolved persona configures a nonblank `permissionDenied` message
-- **WHEN** a command or Tool permission check denies the sender
-- **THEN** the user-visible denial uses that configured message
+- **WHEN** the selected Agent's persona has a nonblank denial message
+- **THEN** the local denial SHALL use that message
 
-#### Scenario: No persona wording is configured
-- **GIVEN** no eligible persona configures a nonblank `permissionDenied` message
-- **WHEN** a command or Tool permission check denies the sender
-- **THEN** the system uses its stable default permission-denied message
+#### Scenario: No persona wording
+- **WHEN** no eligible custom wording exists
+- **THEN** the system SHALL use a stable default denial

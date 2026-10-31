@@ -1,54 +1,21 @@
 {
-  "schemaVersion": 3,
-  "platformDirectory": "data/platform",
-  "runtime": {
-    "server": {"enabled": true, "host": "127.0.0.1", "port": 8080},
-    "database": {"path": "data/priestess.db"},
-    "plugins": {"enabled": false},
-    "reload": {"enabled": true}
-  },
-  "ims": [],
-  "llms": [
-    {
-      "id": "llm",
-      "type": "openai",
-      "enabled": true,
-      "endpoint": "https://api.deepseek.com",
-      "credentialRef": {"source": "ENVIRONMENT", "key": "DEEPSEEK_API_KEY"}
-    }
+  "runtime": "priestess-ts",
+  "schemaVersion": 1,
+  "connections": [{"id": "default", "apiKeyEnv": "OPENAI_API_KEY", "protocol": "responses"}],
+  "agents": [{
+    "id": "assistant", "displayName": "普瑞赛斯", "engine": "agents_sdk", "model": "gpt-4.1-mini", "connectionId": "default",
+    "instructions": "你是普瑞赛斯。根据当前发送者的问题提供准确、有用的帮助。",
+    "capabilities": ["chat", "memory.read", "memory.write", "knowledge.read", "conversation.stop"],
+    "resources": {"memoryLibraries": ["default"], "knowledgeLibraries": ["default"], "tools": ["memory_recall", "memory_save", "memory_delete", "knowledge_search"]},
+    "memoryExtraction": {"enabled": false}, "approvalTools": []
+  }],
+  "platforms": [
+    {"id": "telegram", "type": "telegram", "displayName": "Telegram", "enabled": false, "tokenEnv": "TELEGRAM_BOT_TOKEN"},
+    {"id": "napcat", "type": "napcat", "displayName": "QQ / NapCat", "enabled": false, "websocketUrl": "ws://127.0.0.1:3001", "apiBase": "http://127.0.0.1:3000", "accessTokenEnv": "NAPCAT_TOKEN"},
+    {"id": "weixin", "type": "weixin", "displayName": "微信 iLink", "enabled": false, "tokenEnv": "WEIXIN_TOKEN"}
   ],
-  "agents": [
-    {
-      "id": "assistant",
-      "displayName": "Assistant",
-      "enabled": true,
-      "preset": "NORMAL",
-      "instructions": "You are the assistant for this deployment. Answer the request directly. Use an available tool when it gives you better information than guessing, and say plainly when you cannot do something. Ask for a missing detail instead of inventing it. Only your final message reaches the user, so make it self-contained.",
-      "llm": {"providerRef": "llm", "model": "deepseek-chat", "generation": {"temperature": 0.7, "maxOutputTokens": null}},
-      "configDirectory": "agents/assistant/config",
-      "tempDirectory": "agents/assistant/temp",
-      "context": {"compression": {"strategy": "token_window", "maxRounds": 20, "maxTokens": 32768}, "personaExampleTokens": 512},
-      "execution": {"maxSteps": 25, "toolTimeoutMillis": 30000},
-      "personaId": null,
-      "mcpServerIds": []
-    },
-    {
-      "id": "task-agent",
-      "displayName": "Task Agent",
-      "enabled": true,
-      "preset": "DEEPSEEK_HARNESS",
-      "instructions": "You complete multi-step tasks. Inspect the workspace before changing it, keep going until the task is actually finished, and finish with a self-contained report of what you changed and what you could not do. Never claim a step succeeded without a tool result that says so.",
-      "llm": {"providerRef": "llm", "model": "deepseek-chat", "generation": {"temperature": 0.7, "maxOutputTokens": null}},
-      "configDirectory": "agents/task-agent/config",
-      "tempDirectory": "agents/task-agent/temp",
-      "context": {"compression": {"strategy": "llm_summarization", "maxRounds": 40, "maxTokens": 131072}, "personaExampleTokens": 512},
-      "execution": {"maxSteps": 60, "toolTimeoutMillis": 120000},
-      "personaId": null,
-      "mcpServerIds": []
-    }
-  ],
-  "skillLibraries": [],
-  "memoryLibraries": [],
-  "mcpServers": [],
-  "toolPolicy": {}
+  "memoryLibraries": [{"id": "default", "displayName": "默认记忆库"}],
+  "knowledgeLibraries": [{"id": "default", "displayName": "默认知识库"}],
+  "grants": [],
+  "flow": {"routing": {"defaultAgentId": "assistant", "rules": []}}
 }

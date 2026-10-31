@@ -1,0 +1,27 @@
+import { z } from 'zod';
+import { AgentIdSchema, ContentPartSchema, MessageEventSchema, ExampleDialogsSchema } from './index.js';
+const base = { schemaVersion: z.literal(1).default(1), id: z.string().min(1), revision: z.number().int().nonnegative(), createdAt: z.number(), updatedAt: z.number() };
+export const FolderKindSchema = z.enum(['persona', 'conversation']);
+export type FolderKind = z.infer<typeof FolderKindSchema>;
+export const FolderInputSchema = z.object({ name: z.string().trim().min(1).max(120), kind: FolderKindSchema, parentId: z.string().nullable().default(null) }).strict();
+export const FolderSchema = FolderInputSchema.extend(base);
+export type ManagedFolder = z.infer<typeof FolderSchema>;
+export const PersonaInputSchema = z.object({ name: z.string().trim().min(1).max(120), instructions: z.string().max(100_000), exampleDialogs: ExampleDialogsSchema.default([]), tools: z.array(z.string().trim().min(1)).nullable().default(null), skills: z.array(z.string().trim().min(1)).nullable().default(null), customErrorMessage: z.string().max(10_000).nullable().default(null), voicePrompt: z.string().max(20_000).nullable().default(null), folderId: z.string().nullable().default(null) }).strict();
+export const PersonaSchema = PersonaInputSchema.extend(base);
+export type Persona = z.infer<typeof PersonaSchema>;
+export const PersonaBindingSchema = z.object({ agentId: AgentIdSchema, personaId: z.string().nullable(), revision: z.number().int().nonnegative() }).strict();
+export type PersonaBinding = z.infer<typeof PersonaBindingSchema>;
+export const ConversationSchema = z.object({ ...base, identity: z.string(), sessionKey: z.string(), platform: z.string(), platformType: MessageEventSchema.shape.platformType, sessionId: MessageEventSchema.shape.sessionId, sessionType: MessageEventSchema.shape.sessionType, agentId: z.string(), generation: z.number().int().nonnegative(), ownerId: z.string(), title: z.string().min(1).max(200), folderId: z.string().nullable().default(null), archived: z.boolean().default(false), lastMessage: MessageEventSchema.optional(), recovered: z.boolean().default(false), continuedFrom: z.object({ conversationId: z.string(), title: z.string() }).strict().optional() }).strict();
+export type Conversation = z.infer<typeof ConversationSchema>;
+// Old clients may send folderId. Conversation management is now a single list.
+export const ConversationPatchSchema = z.object({ title: z.string().trim().min(1).max(200), folderId: z.string().nullable().default(null), archived: z.boolean(), expectedRevision: z.number().int().nonnegative() }).strict();
+export const TranscriptEntrySchema = z.object({ schemaVersion: z.literal(1), id: z.string(), conversationId: z.string(), runId: z.string(), role: z.enum(['user', 'assistant']), senderId: z.string(), senderName: z.string(), messageId: z.string(), timestamp: z.number(), parts: z.array(ContentPartSchema) }).strict();
+export type TranscriptEntry = z.infer<typeof TranscriptEntrySchema>;
+export const FolderListSchema = z.object({ folders: z.array(FolderSchema) });
+export const PersonaListSchema = z.object({ personas: z.array(PersonaSchema), bindings: z.array(PersonaBindingSchema) });
+export const ConversationListSchema = z.object({ conversations: z.array(ConversationSchema) });
+export const ConversationDetailSchema = z.object({ conversation: ConversationSchema, entries: z.array(TranscriptEntrySchema), runIds: z.array(z.string()) });
+export const ConversationExportSchema = ConversationDetailSchema.extend({ format: z.literal('priestess-conversation-v1'), exportedAt: z.number() });
+export const ContinueConversationSchema = z.object({ agentId: AgentIdSchema, expectedRevision: z.number().int().nonnegative(), requestId: z.string().uuid() }).strict();
+export const ContinuedConversationSchema = z.object({ conversation: ConversationSchema, sourceConversationId: z.string(), importedEntries: z.number().int().positive() }).strict();
+export type ContinuedConversation = z.infer<typeof ContinuedConversationSchema>;

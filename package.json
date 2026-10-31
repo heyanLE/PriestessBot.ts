@@ -1,0 +1,47 @@
+{
+  "name": "priestessbot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "dev": "tsx apps/server/src/main.ts",
+    "build": "npm run build:server && npm run build:dashboard",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "lint": "eslint packages apps tests tools",
+    "check": "npm run typecheck && npm run lint && npm test",
+    "start": "node dist/apps/server/src/main.js",
+    "migrate": "tsx tools/migrate.ts",
+    "postinstall": "node tools/patch-sdk-types.ts",
+    "build:server": "tsc -p tsconfig.build.json",
+    "build:dashboard": "npm --prefix dashboard run build",
+    "dev:dashboard": "npm --prefix dashboard run dev",
+    "test:dashboard": "npm --prefix dashboard run test:workflows"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@openai/agents": "0.21.0",
+    "katex": "0.19.1",
+    "marked": "18.1.1",
+    "node-pty": "1.1.0",
+    "pdfjs-dist": "6.4.299",
+    "playwright": "1.64.1",
+    "undici": "7.30.1",
+    "ws": "8.22.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/katex": "0.16.8",
+    "@types/node": "22.20.5",
+    "@types/ws": "8.18.2",
+    "eslint": "10.13.0",
+    "jiti": "2.7.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.0"
+  }
+}

@@ -1,17 +1,23 @@
 # Telegram Web Smoke Runbook
 
-## Project Anchors
+## Current PriestessBot runtime
 
-- Server launcher: [run-server.sh](/Users/heyanle/Desktop/project/astrbot.kt/run-server.sh)
-- Smoke prompts: [manual-test-logs/telegram-tools-smoke/tool-burn-cases.md](/Users/heyanle/Desktop/project/astrbot.kt/manual-test-logs/telegram-tools-smoke/tool-burn-cases.md)
-- Multi-role plan: [manual-test-logs/telegram-tools-smoke/test-plan.md](/Users/heyanle/Desktop/project/astrbot.kt/manual-test-logs/telegram-tools-smoke/test-plan.md)
-- Primary config path used by the launcher: [manual-test-logs/telegram-tools-smoke/config.json](/Users/heyanle/Desktop/project/astrbot.kt/manual-test-logs/telegram-tools-smoke/config.json)
+Run from the repository root. Use `npm run dev` for the backend, `npm run dev:dashboard` for the frontend, and `/health` on the configured backend port (default 8081). Use an isolated data directory and an explicitly selected test bot; do not reuse NAS consumers. `tools/live-telegram.ts` is an explicit live-test launcher and reads legacy local credentials from `archive/kotlin/` unless overridden by its environment settings. Never copy those credentials into chat.
+
+Use the currently available Computer Use API and its documented state checks; the historical API names below are not a current API contract. The following anchors and prompts describe the archived Kotlin workflow and must only be used when the user explicitly requests that old implementation.
+
+## Archived Kotlin project anchors
+
+- Server launcher: [run-server.sh](../../../../archive/kotlin/run-server.sh)
+- Smoke prompts: [manual-test-logs/telegram-tools-smoke/tool-burn-cases.md](../../../../archive/kotlin/manual-test-logs/telegram-tools-smoke/tool-burn-cases.md)
+- Multi-role plan: [manual-test-logs/telegram-tools-smoke/test-plan.md](../../../../archive/kotlin/manual-test-logs/telegram-tools-smoke/test-plan.md)
+- Primary config path used by the launcher: [manual-test-logs/telegram-tools-smoke/config.json](../../../../archive/kotlin/manual-test-logs/telegram-tools-smoke/config.json)
 
 Do not copy secrets from the config into chat or the skill. Reuse the configured files in place.
 
-## Local Server Workflow
+## Archived Kotlin local server workflow
 
-1. Start the server with `env PRIESTESS_SERVER_ENABLED=true ./run-server.sh`.
+1. From `archive/kotlin/`, start the explicitly requested historical server with `env PRIESTESS_SERVER_ENABLED=true ./run-server.sh`.
 2. If sandboxed startup fails with a bind error such as `java.net.SocketException: Operation not permitted`, rerun with escalation instead of changing the code.
 3. Confirm startup from logs. The current smoke setup has been responding at `http://127.0.0.1:18080`, even if config files suggest a different port, so trust runtime evidence.
 4. Verify health with `curl -sS http://127.0.0.1:18080/health`.

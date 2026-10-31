@@ -1,0 +1,41 @@
+<div id="priestess-prototype">
+  <div class="px-shell">
+    <aside class="px-sidebar">
+      <div class="px-brand"><img src="__PRIESTESS_LOGO__" alt="普瑞赛斯"><span><strong>普瑞赛斯</strong><small>PriestessBot</small></span></div>
+      <nav aria-label="主导航" class="px-navigation">
+        <button type="button" data-page="workbench"><i data-lucide="house" aria-hidden="true"></i><span>工作台</span></button>
+        <button type="button" data-page="agent" aria-current="page"><i data-lucide="bot" aria-hidden="true"></i><span>Agent</span></button>
+        <button type="button" data-page="bots"><i data-lucide="messages-square" aria-hidden="true"></i><span>机器人</span></button>
+        <button type="button" data-page="resources"><i data-lucide="database" aria-hidden="true"></i><span>资源库</span></button>
+      </nav>
+      <div class="px-sidebar-bottom"><button type="button" data-page="settings"><i data-lucide="settings" aria-hidden="true"></i><span>设置</span></button><small>交互原型 · 所有数据均为示例</small><button class="px-text-button" type="button" data-action="reset">重置演示</button></div>
+    </aside>
+    <main class="px-main">
+      <header class="px-header">
+        <div><p id="px-breadcrumb" class="px-muted">Agent / 普瑞赛斯</p><div class="px-title-row"><h1 id="px-title">普瑞赛斯</h1><span id="px-subtitle" class="px-muted">日常助手</span></div></div>
+        <div id="px-header-actions" class="px-actions"><span id="px-draft-status" role="status" class="px-save-state">当前已发布</span><button type="button" class="px-quiet" id="px-discard" data-action="discard" disabled>放弃修改</button><button type="button" class="px-primary" id="px-publish" data-action="publish" disabled>发布更改</button></div>
+      </header>
+      <div id="px-notice" role="status" aria-live="polite" hidden></div>
+      <section id="px-agent-page">
+        <nav class="px-tabs" aria-label="Agent 设置">
+          <button type="button" data-tab="persona" aria-current="page">人设与模型</button>
+          <button type="button" data-tab="tools">能力与资料</button>
+          <button type="button" data-tab="context">上下文与记忆</button>
+          <button type="button" data-tab="permissions">权限与执行</button>
+        </nav>
+        <div class="px-editor-grid">
+          <section class="px-editor" id="px-editor" aria-label="Agent 编辑器"></section>
+          <section class="px-test" aria-label="测试对话">
+            <div class="px-section-heading"><h2>测试对话</h2><span class="px-tag">使用当前草稿</span><button type="button" class="px-quiet px-push-right" data-action="clear-chat"><i data-lucide="rotate-ccw" aria-hidden="true"></i>清空</button></div>
+            <p class="px-muted px-test-note">模拟回复，不调用模型、不发送到 IM。</p>
+            <div id="px-chat" class="px-chat" aria-live="polite"></div>
+            <div id="px-test-config" class="px-test-config"></div>
+            <form id="px-chat-form" class="px-composer"><label class="px-sr-only" for="px-message">测试消息</label><textarea id="px-message" placeholder="发一条消息，试试当前设置…" rows="3" maxlength="1000"></textarea><div id="px-attachment"></div><div class="px-actions"><label class="px-file-button"><i data-lucide="paperclip" aria-hidden="true"></i><span>附件</span><input id="px-file" type="file" accept="image/*,.pdf,.txt,.md"></label><button class="px-send px-push-right" type="button" data-action="send" id="px-send"><i data-lucide="send" aria-hidden="true"></i>发送</button></div></form>
+          </section>
+        </div>
+      </section>
+      <section id="px-other-page" class="px-content" hidden></section>
+    </main>
+  </div>
+  <dialog id="px-dialog" aria-labelledby="px-dialog-title"><div class="px-dialog-heading"><h2 id="px-dialog-title"></h2><button type="button" class="px-quiet" data-action="close-dialog" aria-label="关闭弹窗"><i data-lucide="x" aria-hidden="true"></i></button></div><div id="px-dialog-content"></div></dialog>
+</div>
