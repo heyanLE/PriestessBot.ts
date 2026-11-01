@@ -81,6 +81,7 @@ def collect_files() -> dict[str, bytes]:
     add_file(files, ROOT / "docs/inline-reply-and-audit-preview.md", "docs/inline-reply-and-audit-preview.md")
     add_file(files, ROOT / "docs/workspace-zones-and-skills.md", "docs/workspace-zones-and-skills.md")
     add_file(files, ROOT / "docs/tool-description-audit.md", "docs/tool-description-audit.md")
+    add_file(files, ROOT / "docs/model-payloads.md", "docs/model-payloads.md")
     manifest = {
         "format": "priestess-native-release-v1",
         "nodeMinimum": "22.18.0",

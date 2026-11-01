@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="dashboard/public/assets/priestess-icon.jpg" alt="PriestessBot Logo" width="160" height="160">
+</p>
+
 # PriestessBot
 
 PriestessBot（普瑞赛斯）是基于 **TypeScript、OpenAI Agents SDK 和 Vue 3** 的 Agent 聊天机器人。支持 NapCat（QQ）、Telegram、微信 iLink，提供独立 Agent、人格、会话、记忆、知识库、工具、执行环境和绿色主题 Dashboard。

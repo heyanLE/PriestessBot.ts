@@ -17,6 +17,7 @@ import { handleSearchHttp } from './search-http.js';
 import { handlePluginsHttp } from './plugins-http.js';
 import { RecordNotFound } from './observability.js';
 import { handleObservabilityHttp } from './observability-http.js';
+import { handleModelPayloadHttp } from './model-payload-http.js';
 import { handleAgentWorkbenchHttp } from './agent-workbench-http.js';
 import type { PriestessRuntime } from './runtime.js';
 
@@ -97,6 +98,7 @@ export function createRuntimeServer(runtime: PriestessRuntime, options: ServerOp
     const route = pathname.slice('/api/ts/'.length).split('/').map(decodeURIComponent);
     const [resource, id, action] = route;
     const method = request.method;
+    if (await handleModelPayloadHttp(runtime, request, response, url, json)) return;
     if (handleObservabilityHttp(runtime, request, response, url, json)) return;
     if (resource === 'jobs' && method === 'GET') { const jobs = runtime.store.list('jobs', JobSchema); for (const document of runtime.knowledge.documents()) jobs.push({ id: `knowledge:${document.id}`, kind: 'knowledge_import', status: document.status === 'ready' ? 'completed' : document.status === 'pending' ? 'queued' : document.status === 'indexing' ? 'running' : 'failed', createdAt: document.createdAt, updatedAt: document.updatedAt, summary: `${document.name}: ${document.chunkCount} chunks${document.error ? '; indexing failed' : ''}` }); json(response, 200, { jobs: jobs.sort((a, b) => b.createdAt - a.createdAt).slice(0, 200) }); return; }
     if (resource === 'config') {

@@ -1,0 +1,19 @@
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue';
+import { auditJsonChildren, auditJsonSummary } from './audit-preview-model';
+import { rawStringSummary, type RawPayloadValue } from './raw-model-payload';
+const props = defineProps<{ value: RawPayloadValue; label?: string; depth?: number; expandedByDefault?: boolean }>();
+const level = computed(() => props.depth ?? 0); const expanded = ref(props.expandedByDefault ?? level.value === 0); const visible = ref(40); const showText = ref(false);
+const container = computed(() => props.value !== null && typeof props.value === 'object');
+const children = computed(() => expanded.value ? auditJsonChildren(props.value) : []);
+const stringSummary = computed(() => typeof props.value === 'string' ? rawStringSummary(props.value) : null);
+watch(() => props.value, () => { expanded.value = props.expandedByDefault ?? level.value === 0; visible.value = 40; showText.value = false; });
+function toggle(event: Event): void { if (event.target === event.currentTarget && event.target instanceof HTMLDetailsElement) expanded.value = event.target.open; }
+</script>
+<template>
+  <details v-if="container" class="raw-json-container" :open="expanded" @toggle="toggle"><summary><strong v-if="label">{{label}}</strong><span>{{auditJsonSummary(value)}}</span></summary><div v-if="expanded" class="raw-json-children"><template v-if="level < 18"><RawModelJsonValue v-for="child in children.slice(0,visible)" :key="child.key" :value="child.value" :label="child.key" :depth="level+1"/><button v-if="visible < children.length" type="button" @click="visible+=40">继续显示 {{Math.min(40,children.length-visible)}} 项（剩余 {{children.length-visible}} 项）</button><p v-if="!children.length">（空{{Array.isArray(value)?'数组':'对象'}}）</p></template><p v-else>此处层级较深。切换到原始 JSON 查看完整结构。</p></div></details>
+  <div v-else class="raw-json-leaf"><strong v-if="label">{{label}}</strong><template v-if="typeof value === 'string' && stringSummary"><div class="raw-json-text"><p v-if="stringSummary.folded" class="raw-json-note">{{stringSummary.label}} · 已折叠，原文完整保留</p><pre v-if="showText || stringSummary.excerpt">{{showText?value:stringSummary.excerpt}}</pre><p v-else-if="!stringSummary.folded">（空文本）</p><button v-if="stringSummary.folded" type="button" :aria-expanded="showText" @click="showText=!showText">{{showText?'收起原文':'展开完整原文'}}</button></div></template><code v-else>{{value===null?'null':String(value)}}</code></div>
+</template>
+<style scoped>
+.raw-json-container,.raw-json-leaf{min-width:0}.raw-json-container>summary{display:flex;gap:9px;align-items:baseline;flex-wrap:wrap;cursor:pointer;line-height:1.7;padding:7px 0;font-size:12px}.raw-json-container>summary::before{content:'▸';color:var(--muted)}.raw-json-container[open]>summary::before{content:'▾'}.raw-json-container summary>span,.raw-json-children>p,.raw-json-note{font-size:11px;color:var(--muted)}.raw-json-container strong,.raw-json-leaf>strong{font:500 11px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.raw-json-children{margin:3px 0 5px 4px;padding-left:13px;border-left:1px solid var(--line);display:grid;gap:7px}.raw-json-leaf{display:grid;grid-template-columns:minmax(60px,140px) minmax(0,1fr);gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}.raw-json-leaf:not(:has(>strong)){grid-template-columns:1fr}.raw-json-leaf>code{font-size:12px;overflow-wrap:anywhere}.raw-json-text{display:grid;gap:8px;min-width:0}.raw-json-text>pre{font:12px/1.8 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:480px;overflow:auto;margin:0}.raw-json-note{margin:0}.raw-json-text>button,.raw-json-children>button{justify-self:start;font-size:11px;padding:4px 9px;background:var(--surface)}@media(max-width:600px){.raw-json-leaf{grid-template-columns:1fr;gap:3px}.raw-json-children{padding-left:9px}}
+</style>

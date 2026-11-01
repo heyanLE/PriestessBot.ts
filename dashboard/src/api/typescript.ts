@@ -66,6 +66,12 @@ export async function runtimeRequest<T>(path: string, schema: { parse(value: unk
   const response = await checkedFetch(path, { method, headers: headers(), ...(serialized === undefined ? {} : { body: serialized }), ...(signal === undefined ? {} : { signal }) });
   return parseResponse(await responseJson(response), schema, response.status);
 }
+/** Fetch exact saved model text through the same management authentication boundary. */
+export async function runtimeText(path: string, signal?: AbortSignal): Promise<string> {
+  const response = await checkedFetch(path, { method: 'GET', headers: headers(), ...(signal === undefined ? {} : { signal }) });
+  try { return await response.text(); }
+  catch (cause) { if (isAbortError(cause)) throw cause; throw networkError(); }
+}
 export async function runtimeAction(path: string, body?: unknown, method: 'POST' | 'PUT' | 'DELETE' = 'POST'): Promise<void> {
   const serialized = requestBody(body);
   await checkedFetch(path, { method, headers: headers(), ...(serialized === undefined ? {} : { body: serialized }) });
