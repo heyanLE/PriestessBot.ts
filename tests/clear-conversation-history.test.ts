@@ -41,7 +41,7 @@ async function fixture(): Promise<{ directory: string; database: string; convers
     store.db.prepare('INSERT INTO group_message_search VALUES(?,?,?)').run(1, scope, 'PRIVATE_GROUP_SEARCH');
     store.db.prepare('INSERT INTO group_message_search_seeds VALUES(?)').run(scope);
     const retained = new Map<string, string>();
-    for (const namespace of ['management-personas', 'management-persona-bindings', 'memories', 'memory-consolidations', 'knowledge-documents', 'knowledge-chunks', 'knowledge-source', 'sdk-compactions', 'artifacts', 'tool-outputs', 'approvals', 'deliveries', 'astrbotx-archive-personas', 'operator-secrets']) {
+    for (const namespace of ['management-personas', 'management-persona-bindings', 'memories', 'memory-consolidations', 'knowledge-documents', 'knowledge-chunks', 'knowledge-source', 'sdk-compactions', 'artifacts', 'tool-outputs', 'approvals', 'deliveries', 'priestess-archive-personas', 'operator-secrets']) {
       store.put(namespace, 'retained', { text: `RETAIN_${namespace}` }); retained.set(namespace, saved(store.db, namespace, 'retained'));
     }
     store.put('management-folders', 'persona-folder', { kind: 'persona', name: 'Persona folder' });

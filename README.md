@@ -75,7 +75,7 @@ python3 scripts/prepare-nas-ts-release.py --output /tmp/priestessbot-release.tar
 
 `compose.yml` 使用当前根目录构建，默认只发布本机 8081 端口。NAS 原生 Node 部署见 [部署说明](docs/nas-native-deployment.md)。发行包采用文件白名单，不包含归档、凭据或运行数据。
 
-旧 Kotlin 配置通过 `npm run migrate -- --source <旧配置> --target <独立新目录>` 做 dry-run；只有明确的 `--apply` 才写入。外部项目导入工具和源格式说明见 [外部数据迁移](docs/astrbotx-migration.md)。
+旧 Kotlin 配置通过 `npm run migrate -- --source <旧配置> --target <独立新目录>` 做 dry-run；只有明确的 `--apply` 才写入。外部项目导入工具和源格式说明见 [外部数据迁移](docs/legacy-import.md)。
 
 ## 名称与来源
 

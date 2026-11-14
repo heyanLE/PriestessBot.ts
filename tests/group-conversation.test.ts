@@ -132,7 +132,7 @@ void test('empty seed markers prevent resurrection and archived/recovered/import
       }
       const id = archive(store, input(store)); const original = manager.detail(id).conversation;
       if (flag === 'tombstone') store.put('management-tombstones', id, { id, deletedAt: Date.now() });
-      else store.put('management-conversations', id, { ...original, ...(flag === 'archived' ? { archived: true } : flag === 'recovered' ? { recovered: true } : { identity: 'astrbotx-imported-archive' }) });
+      else store.put('management-conversations', id, { ...original, ...(flag === 'archived' ? { archived: true } : flag === 'recovered' ? { recovered: true } : { identity: 'priestess-imported-archive' }) });
       assert.equal(service.seedFromTranscript(current.context), 0); assert.deepEqual(service.snapshot(current.context), []);
     } finally { store.close(); }
   }

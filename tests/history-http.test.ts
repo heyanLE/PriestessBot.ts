@@ -21,7 +21,7 @@ void test('authenticated history continuation reaches SDK as scoped text without
   const base = `http://127.0.0.1:${address.port}/api/ts/`;
   async function post(path: string, value: unknown, auth = true): Promise<Response> { return fetch(base + path, { method: 'POST', headers: { ...(auth ? { Authorization: 'Bearer history-test' } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(value) }); }
   try {
-    const message = MessageEventSchema.parse({ platform: 'astrbotx:napcat', platformType: 'napcat', sessionId: 'archive-group', sessionType: 'group', senderId: 'old-user', messageId: 'imported-message', timestamp: 1, parts: [{ type: 'text', text: '历史唯一暗号 pinecone-42' }], botId: 'old-bot' });
+    const message = MessageEventSchema.parse({ platform: 'priestess:napcat', platformType: 'napcat', sessionId: 'archive-group', sessionType: 'group', senderId: 'old-user', messageId: 'imported-message', timestamp: 1, parts: [{ type: 'text', text: '历史唯一暗号 pinecone-42' }], botId: 'old-bot' });
     const captured = runtime.management.captureInbound(message, 'assistant', 0, 'archive-run', conversationKey(message, 'assistant')); if (!captured) throw new Error('No archive'); runtime.management.captureReply('archive-run', [{ type: 'text', text: '已记住这个暗号。' }]); const source = runtime.management.patchConversation(captured.id, { title: 'Archive', folderId: null, archived: true, expectedRevision: captured.revision });
     const action = { agentId: 'assistant', expectedRevision: source.revision, requestId: randomUUID() };
     assert.equal((await post(`conversations/${source.id}/continue`, action, false)).status, 401);

@@ -38,6 +38,8 @@ def collect_files() -> dict[str, bytes]:
         add_file(files, ROOT / name, name)
     skill = "resources/.agent/skill/skill-packager/SKILL.md"
     add_file(files, ROOT / skill, skill)
+    for source in sorted((ROOT / "resources/plugins/response-scenes").rglob("*.md")):
+        add_file(files, source, source.relative_to(ROOT).as_posix())
     # Select outputs by existing source, so removed source files cannot survive
     # a non-clean TypeScript build as stale production modules.
     for tree in ("apps", "packages"):
@@ -46,7 +48,7 @@ def collect_files() -> dict[str, bytes]:
                 continue
             relative = source.relative_to(ROOT).with_suffix(".js")
             add_file(files, ROOT / "dist" / relative, f"dist/{relative.as_posix()}")
-    for source in sorted([*(ROOT / "tools").glob("migrate*.ts"), ROOT / "tools/clear-conversation-history.ts"]):
+    for source in sorted([*(ROOT / "tools").glob("migrate*.ts"), ROOT / "tools/import-legacy.ts", ROOT / "tools/clear-conversation-history.ts"]):
         name = "dist/tools/" + source.with_suffix(".js").name
         add_file(files, ROOT / name, name)
     dashboard = ROOT / "dashboard/dist"

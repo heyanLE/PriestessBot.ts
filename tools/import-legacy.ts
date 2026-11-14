@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { chmod, cp, mkdir, readFile, readdir, stat, realpath, writeFile } from 'node:fs/promises';
 import { basename, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
-import { mapAstrBotXConfiguration, importAstrBotXDatabase, parseAstrBotXJson } from '../packages/core/src/astrbotx-migration.js';
+import { mapLegacyConfiguration, importLegacyDatabase, parseLegacyJson } from '../packages/core/src/legacy-import.js';
 import { RuntimeStore } from '../packages/core/src/storage.js';
 import { validateConfiguration } from '../packages/core/src/flow.js';
 
@@ -16,7 +16,7 @@ async function run(): Promise<void> {
   const command = await readFile(join(source, 'cmd_config.json'), 'utf8');
   const skills = await readFile(join(source, 'skills.json'), 'utf8');
   const napcatToken = args['napcat-token-file'] ? (await readFile(args['napcat-token-file'], 'utf8')).trim() : undefined;
-  const mapping = mapAstrBotXConfiguration(parseAstrBotXJson(command), parseAstrBotXJson(skills), { target, napcatWebsocketUrl: args['napcat-ws'], ...(args['napcat-http'] ? { napcatHttpUrl: args['napcat-http'] } : {}), ...(napcatToken === undefined ? {} : { napcatToken }) });
+  const mapping = mapLegacyConfiguration(parseLegacyJson(command), parseLegacyJson(skills), { target, napcatWebsocketUrl: args['napcat-ws'], ...(args['napcat-http'] ? { napcatHttpUrl: args['napcat-http'] } : {}), ...(napcatToken === undefined ? {} : { napcatToken }) });
   const validation = validateConfiguration(mapping.config); if (!validation.valid) throw new Error(`Mapped configuration validation failed: ${validation.issues.join('; ')}`);
   const skillSources = new Map<string, string>();
   for (const name of mapping.activeSkills) {
@@ -28,15 +28,15 @@ async function run(): Promise<void> {
     }
     if (!skillSources.has(name)) throw new Error(`Active skill ${name} was not found; provide --builtin-skills for AstrBotX bundled skills`);
   }
-  const mcp = z.object({ mcpServers: z.record(z.string(), z.unknown()) }).parse(parseAstrBotXJson(await readFile(join(source, 'mcp_server.json'), 'utf8')));
+  const mcp = z.object({ mcpServers: z.record(z.string(), z.unknown()) }).parse(parseLegacyJson(await readFile(join(source, 'mcp_server.json'), 'utf8')));
   if (Object.keys(mcp.mcpServers).length) throw new Error('Nonempty MCP configuration requires an explicit transport/secret mapping before migration');
   const sourceHash = createHash('sha256').update(command).update(skills).update(await readFile(join(source, 'data_v4.db'))).update(await readFile(join(source, 'data_v4.db-wal')).catch((error: unknown) => { const parsed = z.object({ code: z.string() }).safeParse(error); if (parsed.success && parsed.data.code === 'ENOENT') return Buffer.alloc(0); throw error; })).digest('hex');
-  const report = { format: 'priestess-astrbotx-migration-v1', sourceHash, source, target, applied: args.apply, agents: mapping.config.agents.length, platforms: mapping.config.platforms.map(p => ({ id: p.id, type: p.type, enabled: p.enabled })), activeSkills: mapping.activeSkills, secretCount: mapping.secrets.size, warnings: mapping.warnings, archivedExcludedDirectories: ['temp', 'site-packages'] };
+  const report = { format: 'priestess-legacy-import-v1', sourceHash, source, target, applied: args.apply, agents: mapping.config.agents.length, platforms: mapping.config.platforms.map(p => ({ id: p.id, type: p.type, enabled: p.enabled })), activeSkills: mapping.activeSkills, secretCount: mapping.secrets.size, warnings: mapping.warnings, archivedExcludedDirectories: ['temp', 'site-packages'] };
   if (!args.apply) { console.log(JSON.stringify(report, null, 2)); return; }
   const existing = await readdir(target).catch((error: unknown) => { const parsed = z.object({ code: z.string() }).safeParse(error); if (parsed.success && parsed.data.code === 'ENOENT') return []; throw error; });
   if (existing.length) throw new Error('Migration target is nonempty; refusing to overwrite a previous import or running deployment');
   await mkdir(target, { recursive: true, mode: 0o700 }); await chmod(target, 0o700);
-  const archive = join(target, 'imported', 'astrbotx');
+  const archive = join(target, 'imported', 'legacy');
   await mkdir(join(target, 'imported'), { recursive: true, mode: 0o700 });
   await cp(source, archive, { recursive: true, preserveTimestamps: true, filter: path => path === source || !['temp', 'site-packages'].includes(relative(source, path).split('/')[0] ?? '') });
   await chmod(archive, 0o700);
@@ -50,12 +50,12 @@ async function run(): Promise<void> {
   }
   const store = new RuntimeStore(join(target, 'runtime.sqlite'));
   try {
-    const counts = importAstrBotXDatabase(join(archive, 'data_v4.db'), store, mapping.personaId, { sourceRoot: archive, originalSourceRoot: source, targetRoot: target });
+    const counts = importLegacyDatabase(join(archive, 'data_v4.db'), store, mapping.personaId, { sourceRoot: archive, originalSourceRoot: source, targetRoot: target });
     for (const [name, value] of mapping.secrets) store.put('operator-secrets', name, { name, value, updatedAt: Date.now() });
     store.publishConfig(mapping.config, 0);
     const finished = { ...report, counts, completedAt: new Date().toISOString() };
-    store.put('migration-reports', 'astrbotx', finished);
-    await writeFile(join(target, 'astrbotx-migration-report.json'), JSON.stringify(finished, null, 2), { mode: 0o600 });
+    store.put('migration-reports', 'legacy', finished);
+    await writeFile(join(target, 'migration-report.json'), JSON.stringify(finished, null, 2), { mode: 0o600 });
     await chmod(join(target, 'runtime.sqlite'), 0o600);
     console.log(JSON.stringify(finished, null, 2));
   } finally { store.close(); }

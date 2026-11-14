@@ -13,5 +13,5 @@ export const conversationHistoryNamespaces: readonly string[] = Object.freeze([
   'sdk-history', 'sdk-history-legacy-dynamic-archive', 'sdk-context-usage', 'sdk-context-summary', 'sdk-context-summary-cache',
   'sdk-pauses', 'paused-inputs', 'public-group-conversations', 'run-follow-ups',
   'history-continuation-seeds', 'history-continuation-receipts',
-  'astrbotx-archive-conversations', 'astrbotx-archive-platform_message_history', 'astrbotx-archive-platform_sessions',
+  'priestess-archive-conversations', 'priestess-archive-platform_message_history', 'priestess-archive-platform_sessions',
 ]);
