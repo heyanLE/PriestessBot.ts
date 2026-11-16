@@ -59,13 +59,12 @@ export async function pruneModelRecords(options: PruneOptions): Promise<PruneRep
   }
   const present = new Set(names.map(name => name.slice(0, -'.body'.length)));
   const db = new DatabaseSync(options.database, { readOnly: true });
-  let rows = 0;
-  let orphans = 0;
-  try {
-    const known = new Set(z.array(z.object({ id: z.string() })).parse(db.prepare(`SELECT id FROM documents WHERE namespace='${NAMESPACE}'`).all()).map(row => row.id));
-    rows = stale.filter(item => known.has(item.id)).length;
-    orphans = [...known].filter(id => !present.has(id)).length;
-  } finally { db.close(); }
+  const { rows, orphans } = (() => {
+    try {
+      const known = new Set(z.array(z.object({ id: z.string() })).parse(db.prepare(`SELECT id FROM documents WHERE namespace='${NAMESPACE}'`).all()).map(row => row.id));
+      return { rows: stale.filter(item => known.has(item.id)).length, orphans: [...known].filter(id => !present.has(id)).length };
+    } finally { db.close(); }
+  })();
 
   const report: PruneReport = {
     records: options.records, keepDays: options.keepDays, applied: options.apply === true, cutoff: new Date(cutoffMs).toISOString(),
