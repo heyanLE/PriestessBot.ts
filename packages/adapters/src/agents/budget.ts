@@ -4,6 +4,27 @@ export class RunBudgetError extends Error {
   override readonly name = 'RunBudgetError';
   constructor(readonly used: number, readonly limit: number) { super(`Run token budget exhausted (used ${used}, limit ${limit})`); }
 }
+/** Provider usage shape accepted by the SDK's Usage constructor. */
+export interface ProviderUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly totalTokens: number;
+  readonly requests?: number | undefined;
+  readonly inputTokensDetails?: protocol.TokenDetails | protocol.TokenDetails[] | undefined;
+  readonly outputTokensDetails?: protocol.TokenDetails | protocol.TokenDetails[] | undefined;
+}
+/**
+ * Rebuild a Usage without dropping the provider's per-request details.
+ * Cache-hit counters live in `input_tokens_details`.
+ */
+export function toBudgetUsage(usage: ProviderUsage): Usage {
+  const base = { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens, requests: usage.requests ?? 1 };
+  return new Usage({
+    ...base,
+    ...(usage.inputTokensDetails === undefined ? {} : { inputTokensDetails: usage.inputTokensDetails }),
+    ...(usage.outputTokensDetails === undefined ? {} : { outputTokensDetails: usage.outputTokensDetails }),
+  });
+}
 export interface BudgetedModelOptions {
   readonly mode?: 'cumulative' | 'context';
   /** Estimated next input plus tokens kept aside for a tool-free final answer. */
@@ -36,8 +57,8 @@ export class BudgetedModel implements Model {
   async *getStreamedResponse(request: ModelRequest): AsyncIterable<protocol.StreamEvent> {
     for await (const event of this.model.getStreamedResponse(this.request(request))) {
       if (event.type === 'response_done') {
-        const usage = event.response.usage;
-        this.consume(new Usage({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens, requests: usage.requests ?? 1 }));
+        // Details carry the provider's cache-hit counters; never drop them here.
+        this.consume(toBudgetUsage(event.response.usage));
       }
       yield event;
     }
