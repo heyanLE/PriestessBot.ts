@@ -8,6 +8,7 @@ import { AgentsContextSummarizer } from './context-summary.js';
 import { SqliteAgentSession, estimateContextTokens } from './session.js';
 import { principalKey } from '../../../core/src/authorization.js';
 import { activeInputIndex, assembleRootInstructions, synchronizePersonaAnchors } from './prompt-context.js';
+import { cachedInputTokens } from './usage.js';
 import { DynamicContextModel, type DynamicContextSnapshot } from './dynamic-context.js';
 import type { PublicGroupMessage } from '../../../contracts/src/group-conversation.js';
 import type { PortableHistoryItem } from '../../../core/src/history-continuation.js';
@@ -94,7 +95,8 @@ export class AgentsSdkEngine implements AgentEngine {
       usedInputTokens += usage.inputTokens; usedOutputTokens += usage.outputTokens;
       if (source === 'model') { previousInputTokens = usage.inputTokens; previousEstimatedTokens = currentEstimatedTokens; }
       if(source!=='delegation')usageCalls++;
-      send({ type: 'usage', inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, source, ...(source === 'delegation' ? {} : { modelCall: observedModelCalls || usageCalls }) });
+      const cached = cachedInputTokens(usage);
+      send({ type: 'usage', inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, ...(cached > 0 ? { cachedInputTokens: cached } : {}), source, ...(source === 'delegation' ? {} : { modelCall: observedModelCalls || usageCalls }) });
     };
     const taskTexts = input.message.parts.flatMap(part => part.type === 'text' ? [part.text] : []);
     const toolFacts: string[] = [];
@@ -107,7 +109,17 @@ export class AgentsSdkEngine implements AgentEngine {
     const summarizer = new AgentsContextSummarizer(input, { ...(rawCapture ? { captureModel: true } : {}), auditModel:(model,modelName)=>new AuditedModel(model,{model:modelName,source:()=>'compression',nextCall,knownSecrets,emit:send,...(rawCapture ? {rawCapture} : {})}), config: deps.config, secret: deps.secret, assertCurrent: () => deps.assertCurrent(input), ...(deps.model ? { model: deps.model } : {}), usedTokens, accountUsage: usage => { accountUsage(usage, 'compression'); localContext.usage.add(usage); } });
     const session = new SqliteAgentSession(deps.store, input.session.id, () => deps.assertCurrent(input), input.context.depth===0&&input.message.sessionType==='group'&&deps.groupHistory?{targetChars:64_000,triggerChars:96_000,hardChars:48_000_000}:undefined, { policy: input.agent.contextPolicy, summarize: (items, maxChars, source) => summarizer.summarize(items, maxChars, source) });
     let latestInput = input; let preparedHistory: AgentInputItem[] = [];
-    const dynamicModel = new DynamicContextModel(new AuditedModel(selectedModel,{model:input.agent.model,source:()=>modelSource,nextCall,knownSecrets,emit:send,...(rawCapture ? {rawCapture} : {})}), { scope: input.session.id, maxChars: 16000, insertionIndex: items => activeInputIndex(items, userInputs), assertCurrent: () => deps.assertCurrent(input), snapshot: () => deps.dynamicContext?.(latestInput) ?? Promise.resolve({scope:input.session.id,components:[]}), validateRequest: request => { if (finalInputAllowance !== undefined && estimateContextTokens(request.input) + estimateContextTokens(request.systemInstructions ?? '') > finalInputAllowance) throw new Error('Finalization input exceeds remaining cumulative budget'); const external = Math.max(0, estimateContextTokens(request.input) - estimateContextTokens(preparedHistory)) + estimateContextTokens(request.systemInstructions ?? '') + estimateContextTokens(JSON.stringify(request.tools)); session.assertWithinWindow(preparedHistory, external + modelOutputAllowance); }, observeUsage: (request, inputTokens) => { const external = Math.max(0, estimateContextTokens(request.input) - estimateContextTokens(preparedHistory)) + estimateContextTokens(request.systemInstructions ?? '') + estimateContextTokens(JSON.stringify(request.tools)); session.observeUsage(preparedHistory, {inputTokens}, external); } });
+    let preparedDynamicContext: DynamicContextSnapshot = { scope: input.session.id, components: [] };
+    const prepareDynamicContext = async (): Promise<DynamicContextSnapshot | undefined> => {
+      deps.assertCurrent(latestInput);
+      const snapshot = await deps.dynamicContext?.(latestInput);
+      deps.assertCurrent(latestInput);
+      // Budgeting and dispatch share one snapshot. The next model round refreshes
+      // mutable memory and retrieval after tools or additional user input.
+      preparedDynamicContext = snapshot ?? { scope: input.session.id, components: [] };
+      return snapshot;
+    };
+    const dynamicModel = new DynamicContextModel(new AuditedModel(selectedModel,{model:input.agent.model,source:()=>modelSource,nextCall,knownSecrets,emit:send,...(rawCapture ? {rawCapture} : {})}), { scope: input.session.id, maxChars: 16000, insertionIndex: items => activeInputIndex(items, userInputs), assertCurrent: () => deps.assertCurrent(input), snapshot: () => preparedDynamicContext, validateRequest: request => { if (finalInputAllowance !== undefined && estimateContextTokens(request.input) + estimateContextTokens(request.systemInstructions ?? '') > finalInputAllowance) throw new Error('Finalization input exceeds remaining cumulative budget'); const external = Math.max(0, estimateContextTokens(request.input) - estimateContextTokens(preparedHistory)) + estimateContextTokens(request.systemInstructions ?? '') + estimateContextTokens(JSON.stringify(request.tools)); session.assertWithinWindow(preparedHistory, external + modelOutputAllowance); }, observeUsage: (request, inputTokens) => { const external = Math.max(0, estimateContextTokens(request.input) - estimateContextTokens(preparedHistory)) + estimateContextTokens(request.systemInstructions ?? '') + estimateContextTokens(JSON.stringify(request.tools)); session.observeUsage(preparedHistory, {inputTokens}, external); } });
     const instructions = assembleRootInstructions(input.agent.instructions);
     const agent = new Agent<SdkLocalContext>({
       name: input.agent.id, instructions,
@@ -142,7 +154,7 @@ export class AgentsSdkEngine implements AgentEngine {
           const additional = await deps.followUps?.(input, false) ?? [];
           for (const followUp of additional) { latestInput = followUp; const messages = modelInput(followUp); steered.push(...messages); currentInputs.push(...messages); userInputs.push(...messages.slice(-1)); taskTexts.push(...followUp.message.parts.flatMap(part => part.type === 'text' ? [part.text] : [])); }
           const combined = [...modelData.input]; for (const item of steered) if (!combined.some(existing => JSON.stringify(existing) === JSON.stringify(item))) combined.push(item);
-          const snapshot = await deps.dynamicContext?.(latestInput); const dynamicTokens = snapshot ? estimateContextTokens(JSON.stringify(snapshot.components).slice(0,16000)) + 150 : 0;
+          const snapshot = await prepareDynamicContext(); const dynamicTokens = snapshot ? estimateContextTokens(JSON.stringify(snapshot.components).slice(0,16000)) + 150 : 0;
           const reserved = estimateContextTokens(modelData.instructions ?? '') + estimateContextTokens(JSON.stringify(tools)) + dynamicTokens + Math.min(input.context.budget.maxTokens, Math.floor(input.agent.contextPolicy.contextWindowTokens / 4));
           const anchored = synchronizePersonaAnchors(combined, input.agent, activeInputIndex(combined, currentInputs));
           preparedHistory = await session.processInput(anchored, reserved, {hardLimitOnly});
@@ -213,7 +225,7 @@ export class AgentsSdkEngine implements AgentEngine {
           for (const item of currentInputs) if (!present.has(JSON.stringify(protocol.ModelItem.parse(item)))) history.push(item);
           modelOutputAllowance = Math.min(2048, input.context.budget.maxTokens);
           if (input.context.budget.tokenLimitMode === 'cumulative') finalInputAllowance = input.context.budget.maxTokens - usedTokens() - modelOutputAllowance;
-          const snapshot = await deps.dynamicContext?.(latestInput);
+          const snapshot = await prepareDynamicContext();
           const dynamicTokens = snapshot ? estimateContextTokens(JSON.stringify(snapshot.components).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e').slice(0, 16000)) + 150 : 0;
           modelSource='finalization';
           text = await this.finalize(input, dynamicModel, runner, instructions, history, currentInputs, session, dynamicTokens, reason, usedTokens, usage => accountUsage(usage, 'finalization'), items => { preparedHistory = items; }) ?? fallback;

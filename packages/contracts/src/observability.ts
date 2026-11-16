@@ -10,7 +10,7 @@ export const RouteRecordSchema = z.object({
   platform: z.string(), platformType: PlatformTypeSchema.nullable(), sessionType: z.enum(['private', 'group']), sessionId: z.string(), sessionName: z.string().default(''),
   senderId: z.string(), senderName: z.string().default(''), messageId: z.string().nullable(), inputPreview: AuditPreviewSchema.nullable(),
   outcome: RouteOutcomeSchema, reason: z.string().max(1000).default(''), agentId: z.string().nullable(), runtimeState: RuntimeStateSchema.nullable(), runId: z.string().nullable(),
-  path: z.array(RouteTraceStepSchema), legacy: z.boolean().default(false),
+  path: z.array(RouteTraceStepSchema), legacy: z.boolean().default(false), routingDecision: z.unknown().optional(),
 }).strict();
 export type RouteRecord = z.infer<typeof RouteRecordSchema>;
 export const AgentRecordMetadataSchema = z.object({ runId: z.string(), platform: z.string(), platformType: PlatformTypeSchema, sessionType: z.enum(['private', 'group']), sessionId: z.string(), sessionName: z.string().default(''), model: z.string(), engine: z.string(), runtimeState: RuntimeStateSchema, configRevision: z.number().int(), flowRevision: z.number().int(), inputPreview: AuditPreviewSchema, startedAt: z.number(), routeRecordId: z.string().nullable(), parentRunId: z.string().nullable() }).strict();
@@ -18,7 +18,7 @@ export type AgentRecordMetadata = z.infer<typeof AgentRecordMetadataSchema>;
 export const AgentRecordSchema = RunSummarySchema.extend({
   platform: z.string().nullable(), platformType: PlatformTypeSchema.nullable(), sessionType: z.enum(['private', 'group']).nullable(), sessionId: z.string().nullable(), sessionName: z.string().default(''),
   conversationId: z.string().nullable(), routeRecordIds: z.array(z.string()), model: z.string().nullable(), engine: z.string().nullable(), runtimeState: RuntimeStateSchema.nullable(),
-  modelCalls: z.number().int().nonnegative().nullable(), toolCalls: z.number().int().nonnegative().nullable(), inputTokens: z.number().int().nonnegative().nullable(), outputTokens: z.number().int().nonnegative().nullable(), durationMs: z.number().nonnegative().nullable(), firstTokenMs: z.number().nonnegative().nullable(), telemetryComplete: z.boolean(), legacy: z.boolean(),
+  modelCalls: z.number().int().nonnegative().nullable(), toolCalls: z.number().int().nonnegative().nullable(), inputTokens: z.number().int().nonnegative().nullable(), outputTokens: z.number().int().nonnegative().nullable(), cachedInputTokens: z.number().int().nonnegative().nullable(), durationMs: z.number().nonnegative().nullable(), firstTokenMs: z.number().nonnegative().nullable(), telemetryComplete: z.boolean(), legacy: z.boolean(),
 });
 export type AgentRecord = z.infer<typeof AgentRecordSchema>;
 const pagination = { total: z.number().int().nonnegative(), offset: z.number().int().nonnegative(), limit: z.number().int().positive() };

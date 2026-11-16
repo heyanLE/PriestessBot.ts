@@ -1,6 +1,7 @@
 import { readdir, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 
@@ -111,7 +112,10 @@ function parseArgs(argv: readonly string[]): PruneOptions {
   return { database: args.database, records: args.records, keepDays: args['keep-days'], apply: args.apply };
 }
 
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] !== undefined && (() => {
+  // `current` is a symlink on the NAS: compare resolved paths, never the raw argv.
+  try { return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; }
+})()) {
   try { console.log(JSON.stringify(await pruneModelRecords(parseArgs(process.argv.slice(2))), null, 2)); }
   catch (error) { console.error(error instanceof z.ZodError ? `Argument validation failed at ${error.issues.map(issue => issue.path.join('.')).join(', ')}` : error instanceof Error ? error.message : 'Prune failed'); process.exitCode = 1; }
 }
