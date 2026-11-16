@@ -10,9 +10,11 @@ const agent = AgentDefinitionSchema.parse({
 });
 const current: AgentInputItem[] = [{ role: 'user', content: [{ type: 'input_text', text: '<context_unit>Current sender and reference metadata</context_unit>' }] }, { role: 'user', content: 'Actual user request' }];
 function anchorTexts(items: readonly AgentInputItem[]): string[] {
-  return items.flatMap(item => 'role' in item && item.role === 'user' && Array.isArray(item.content)
-    ? item.content.flatMap(part => part.type === 'input_text' && part.text.startsWith('<context_anchor ') ? [part.text] : [])
-    : []);
+  return items.flatMap(item => {
+    if (!('role' in item) || (item.role !== 'user' && item.role !== 'system')) return [];
+    const texts = typeof item.content === 'string' ? [item.content] : item.content.flatMap(part => part.type === 'input_text' ? [part.text] : []);
+    return texts.filter(text => text.startsWith('<context_anchor '));
+  });
 }
 
 void test('persona and scene examples become separate persistent references ahead of active request metadata', () => {
@@ -103,4 +105,15 @@ void test('examples escape XML-like text while preserving their fictional scene 
   const examples = anchorTexts(escaped).find(text => text.startsWith('<context_anchor name="persona_examples"'));
   assert.ok(examples); assert.doesNotMatch(examples, /<system>|<scene>/);
   assert.match(examples, /\\u003csystem\\u003e/);
+});
+
+void test('a legacy user-role persona anchor does not satisfy the system-role anchor', () => {
+  const initial = synchronizePersonaAnchors(current, agent, 0);
+  const personaText = anchorTexts(initial).find(text => text.startsWith('<context_anchor name="persona"'));
+  assert.ok(personaText);
+  // Exactly what older sessions stored: the same text, but as a user message.
+  const legacy: AgentInputItem[] = [{ role: 'user', content: [{ type: 'input_text', text: personaText }] }, ...current];
+  const synchronized = synchronizePersonaAnchors(legacy, agent, legacy.length);
+  const personaAnchors = synchronized.filter(item => 'role' in item && item.role === 'system' && item.content.includes('<context_anchor name="persona"'));
+  assert.equal(personaAnchors.length, 1, 'role change must force a replacement anchor');
 });

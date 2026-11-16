@@ -39,9 +39,13 @@ void test('static prompt preview matches the real SDK root and persona anchors w
     assert.equal(preview.contextMessages.length, 2);
     assert.equal(typeof request.input, 'object');
     if (typeof request.input === 'string') throw new Error('Structured model input expected');
-    const texts = request.input.flatMap(item => 'role' in item && item.role === 'user' && Array.isArray(item.content) ? item.content.flatMap(part => part.type === 'input_text' ? [part.text] : []) : []);
+    const texts = request.input.flatMap(item => {
+      if (!('role' in item) || (item.role !== 'user' && item.role !== 'system')) return [];
+      return typeof item.content === 'string' ? [item.content] : item.content.flatMap(part => part.type === 'input_text' ? [part.text] : []);
+    });
     for (const anchor of preview.contextMessages) {
-      assert.equal(anchor.role, 'user');
+      // The persona anchor is system-level; example references stay user-level.
+      assert.equal(anchor.role, anchor.content[0]?.text.includes('name="persona"') ? 'system' : 'user');
       for (const part of anchor.content) assert.ok(texts.includes(part.text));
     }
     assert.match(texts.join('\n'), /live-memory-fixture|Actual user request/);
@@ -50,7 +54,11 @@ void test('static prompt preview matches the real SDK root and persona anchors w
     const next = { ...input, context: { ...context, runId: RunIdSchema.parse('preview-next-run'), turnId: 'next-turn' } };
     assert.equal((await engine.run(next, () => undefined)).status, 'completed');
     const second = model.requests[1]; assert.ok(second); if (typeof second.input === 'string') throw new Error('Structured model input expected');
-    const anchors = second.input.flatMap(item => 'role' in item && item.role === 'user' && Array.isArray(item.content) ? item.content.filter(part => part.type === 'input_text' && part.text.startsWith('<context_anchor ')) : []);
+    const anchors = second.input.flatMap(item => {
+      if (!('role' in item) || (item.role !== 'user' && item.role !== 'system')) return [];
+      const texts = typeof item.content === 'string' ? [item.content] : item.content.flatMap(part => part.type === 'input_text' ? [part.text] : []);
+      return texts.filter(text => text.startsWith('<context_anchor '));
+    });
     assert.equal(anchors.length, 2, 'Unchanged persona and examples are reused rather than appended each turn');
   } finally { store.close(); }
 });
