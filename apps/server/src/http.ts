@@ -5,6 +5,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { ArtifactIdSchema, MessageEventSchema, PrincipalSchema, MemoryRecordSchema, RuntimeConfigSchema, JobSchema, type MessageEvent, type ContentPart } from '../../../packages/contracts/src/index.js';
 import { validateConfiguration } from '../../../packages/core/src/flow.js';
+import { deepseekFilePurpose } from '../../../packages/adapters/src/media/deepseek-files.js';
 import { imageMime } from '../../../packages/adapters/src/media/index.js';
 import { OperatorManagement } from './operator.js';
 import { WorkspaceFiles } from './workspace-files.js';
@@ -14,6 +15,7 @@ import { handleManagementHttp } from './management-http.js';
 import { handleExtensionsHttp } from './extensions-http.js';
 import { handleMemoryMaintenanceHttp } from './memory-maintenance-http.js';
 import { handleSearchHttp } from './search-http.js';
+import { handleFileParsingHttp } from './file-parsing-http.js';
 import { handlePluginsHttp } from './plugins-http.js';
 import { RecordNotFound } from './observability.js';
 import { handleObservabilityHttp } from './observability-http.js';
@@ -40,7 +42,7 @@ export function createRuntimeServer(runtime: PriestessRuntime, options: ServerOp
   const body = async (request: IncomingMessage): Promise<unknown> => { const chunks: Buffer[] = []; let bytes = 0; for await (const raw of request) { const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(z.string().parse(raw)); bytes += chunk.length; if (bytes > 30_000_000) throw new Error('Request exceeds size limit'); chunks.push(chunk); } const text = Buffer.concat(chunks).toString('utf8'); const parsed: unknown = JSON.parse(text || '{}'); return parsed; };
   const prepareDashboardMedia = async (message: MessageEvent): Promise<MessageEvent> => {
     const parts: ContentPart[] = [];
-    let totalBytes = 0; let totalText = 0;
+    let totalBytes = 0;
     for (const part of message.parts) {
       if (part.type !== 'image' && part.type !== 'file') { parts.push(part); continue; }
       if (!part.url.startsWith('artifact:')) throw new Error('Upload media before sending it from the Dashboard');
@@ -49,7 +51,7 @@ export function createRuntimeServer(runtime: PriestessRuntime, options: ServerOp
       const bytes = await readFile(artifact.file);
       totalBytes += bytes.length; if (totalBytes > 20_000_000) throw new Error('Combined media exceeds per-turn size budget');
       if (part.type === 'image') { const mime = imageMime(bytes); if (!mime) throw new Error('Invalid image'); parts.push({ ...part, url: `data:${mime};base64,${bytes.toString('base64')}`, mimeType: mime }); }
-      else { const extractedText = await runtime.media.extract(bytes, artifact.mimeType, artifact.name); totalText += extractedText.length; if (totalText > 80_000) throw new Error('Combined attachment text exceeds per-turn budget'); parts.push({ ...part, mimeType: artifact.mimeType, extractedText }); }
+      else { parts.push({ ...part, name: artifact.name, mimeType: artifact.mimeType, size: bytes.length, extractedText: undefined, modelFile: undefined }); }
     }
     return { ...message, parts };
   };
@@ -92,6 +94,7 @@ export function createRuntimeServer(runtime: PriestessRuntime, options: ServerOp
     if (await handleManagementHttp({ runtime, request, response, url, body, json })) return;
     if (await handleAgentWorkbenchHttp({ runtime, request, response, url, body, json })) return;
     if(await handleSearchHttp({service:runtime.search,management:runtime.management,config:()=>runtime.config(),request,response,url,body,json}))return;
+    if (await handleFileParsingHttp({ service: runtime.fileParsing, remoteAvailable: () => runtime.config().connections.some(item => item.fileUpload !== undefined), request, response, url, body, json })) return;
     if(await handlePluginsHttp({runtime,request,response,url,body,json}))return;
     if (await handleExtensionsHttp(runtime.extensions, request, response, url, body, json)) return;
     if (await handleMemoryMaintenanceHttp(runtime.memoryMaintenance, request, response, url, body, json)) return;
@@ -191,7 +194,7 @@ export function createRuntimeServer(runtime: PriestessRuntime, options: ServerOp
       if (!id && method === 'POST') {
         const data = z.object({ name: z.string().min(1).max(255), mimeType: z.string().regex(/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i), encoding: z.literal('base64'), content: z.string().max(28_000_000) }).parse(await body(request));
         const bytes = Buffer.from(data.content, 'base64'); if (bytes.length > 20_000_000) throw new Error('Artifact exceeds size limit');
-        if (data.mimeType.startsWith('image/')) { if (!imageMime(bytes)) throw new Error('Invalid image'); } else await runtime.media.extract(bytes, data.mimeType, data.name);
+        if (data.mimeType.startsWith('image/')) { if (!imageMime(bytes)) throw new Error('Invalid image'); } else if (runtime.config().connections.some(connection => connection.fileUpload)) deepseekFilePurpose(data.name, data.mimeType, 'text_recognition'); else await runtime.media.extract(bytes, data.mimeType, data.name);
         const artifactId = ArtifactIdSchema.parse(randomUUID()); await mkdir(options.artifacts, { recursive: true, mode: 0o700 }); const file = path.join(options.artifacts, artifactId); await writeFile(file, bytes, { flag: 'wx', mode: 0o600 });
         runtime.store.put('artifacts', artifactId, { id: artifactId, name: path.basename(data.name), mimeType: data.mimeType, size: bytes.length, file });
         json(response, 201, { id: artifactId, url: `artifact:${artifactId}`, name: path.basename(data.name), mimeType: data.mimeType, size: bytes.length }); return;

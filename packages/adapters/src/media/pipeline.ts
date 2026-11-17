@@ -5,7 +5,7 @@ import type { PlatformAdapter, DownloadedMedia } from '../platforms/types.js';
 import type { ModelFileReference } from '../../../contracts/src/model-files.js';
 import { officeKind, officeText, OfficeError } from './office.js';
 export interface MediaPolicy { readonly maxBytes: number; readonly maxTextChars: number; readonly maxPdfPages: number; readonly maxAttachments?: number; }
-const defaultPolicy: MediaPolicy = { maxBytes: 20_000_000, maxTextChars: 80_000, maxPdfPages: 100 };
+export const MEDIA_DEFAULT_POLICY: MediaPolicy = Object.freeze({ maxBytes: 20_000_000, maxTextChars: 80_000, maxPdfPages: 100 });
 export function imageMime(bytes: Uint8Array): string | undefined {
   const buffer = Buffer.from(bytes);
   if (buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png';
@@ -17,7 +17,7 @@ export function imageMime(bytes: Uint8Array): string | undefined {
 class MediaBudgetError extends PlatformError { constructor(message: string) { super('rejected', message); } }
 /** Materialize authenticated protocol media before invoking a model; URLs never become paths. */
 export class MediaPipeline {
-  constructor(private readonly policy: MediaPolicy = defaultPolicy) {}
+  constructor(private readonly policy: MediaPolicy = MEDIA_DEFAULT_POLICY) {}
   async prepare(event: MessageEvent, adapter: Pick<PlatformAdapter, 'downloadMedia'>, signal: AbortSignal, uploadFile?: (media: DownloadedMedia) => Promise<ModelFileReference>): Promise<MessageEvent> {
     const parts: ContentPart[] = [];
     let totalBytes = 0;

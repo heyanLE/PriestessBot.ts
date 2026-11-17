@@ -16,8 +16,9 @@ import { HttpEmbeddingProvider, HttpReranker } from '../../../packages/adapters/
 import { MemoryJobs } from '../../../packages/adapters/src/resources/memory-jobs.js';
 import { PlatformManager, WeixinAdapter, NapCatAdapter, PlatformError, type PlatformStatus, type PlatformAdapter, type StateStore, type AdapterDependencies } from '../../../packages/adapters/src/platforms/index.js';
 import { MessageContextBuilder, StreamDelivery, paginate, type PreparedMessageContext } from '../../../packages/adapters/src/messages/index.js';
-import { MediaPipeline } from '../../../packages/adapters/src/media/index.js';
+import { MEDIA_DEFAULT_POLICY, MediaPipeline } from '../../../packages/adapters/src/media/index.js';
 import { DeepSeekFiles } from '../../../packages/adapters/src/media/deepseek-files.js';
+import { FileParsingSettingsService, shouldUploadDocuments } from './file-parsing.js';
 import type { DownloadedMedia } from '../../../packages/adapters/src/platforms/types.js';
 import { NativeExtensionRegistry } from '../../../packages/adapters/src/extensions/index.js';
 import { MemoryMaintenance } from '../../../packages/adapters/src/resources/memory-maintenance.js';
@@ -76,6 +77,7 @@ export class PriestessRuntime {
   readonly messages = new MessageContextBuilder();
   readonly media = new MediaPipeline();
   readonly modelFiles: DeepSeekFiles;
+  readonly fileParsing: FileParsingSettingsService;
   readonly engine: AgentsSdkEngine;
   readonly delegation: DelegationService;
   readonly skills: SkillResources;
@@ -111,6 +113,7 @@ export class PriestessRuntime {
     const fallbackSecret = options.secret ?? (name => process.env[name]);
     this.secret = name => this.operator.secret(name) ?? fallbackSecret(name);
     this.modelFiles = new DeepSeekFiles(this.store, this.secret);
+    this.fileParsing = new FileParsingSettingsService(this.store);
     this.management = new ManagementService(this.store);
     this.draftTester = new AgentDraftTester({ management: this.management, secret: this.secret, ...(options.model ? { model: options.model } : {}) });
     this.groupConversation = new GroupConversationService(this.store);
@@ -455,11 +458,16 @@ export class PriestessRuntime {
     const connection = this.config().connections.find(item => item.id === agent.connectionId);
     const scope = this.groupConversation.scope(context) ?? this.modelSessionId(context);
     const guard = (): void => { context.signal.throwIfAborted(); this.auth.assert(context, 'chat', agent); };
-    const upload = connection?.fileUpload ? async (media: DownloadedMedia) => {
+    // The switch decides who parses: our process, or the provider for layout-heavy documents.
+    const parsing = this.fileParsing.settings();
+    const connectionUpload = connection?.fileUpload;
+    const upload = connection !== undefined && connectionUpload !== undefined && shouldUploadDocuments(parsing, true) ? async (media: DownloadedMedia) => {
       if (!['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp'].includes(agent.model)) throw new Error('DeepSeek 文档问答需要使用 deepseek-flash 模型。');
-      return this.modelFiles.upload(connection, scope, media, context.signal, guard);
+      const fileUpload = { provider: connectionUpload.provider, purpose: parsing.purpose, expiresAfterSeconds: parsing.expiresAfterSeconds };
+      return this.modelFiles.upload({ ...connection, fileUpload }, scope, media, context.signal, guard);
     } : undefined;
-    return this.media.prepare(message, adapter ?? { downloadMedia: async (part, signal) => {
+    const pipeline = new MediaPipeline({ ...MEDIA_DEFAULT_POLICY, maxBytes: parsing.maxBytes, maxTextChars: parsing.maxTextChars });
+    return pipeline.prepare(message, adapter ?? { downloadMedia: async (part, signal) => {
       if (part.type === 'image' && part.url.startsWith('data:image/')) return { bytes: Buffer.from(part.url.slice(part.url.indexOf(',') + 1), 'base64'), mimeType: part.mimeType, name: 'image' };
       if (!this.mediaResolvers.resolveMedia) throw new Error('附件读取服务不可用。');
       return this.mediaResolvers.resolveMedia(part, signal);

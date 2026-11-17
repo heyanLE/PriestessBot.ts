@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:http';
 import { protocol, type Model, type ModelRequest, type ModelResponse } from '@openai/agents';
 import type { z } from 'zod';
 import { PriestessRuntime, defaultConfiguration } from '../apps/server/src/runtime.js';
@@ -112,6 +113,30 @@ void test('HTTP artifacts require auth and upload validation before model attach
   assert.match(JSON.stringify(model.requests.at(-1)?.input), /Untrusted attachment text/);
   assert.equal((await request('chat', 'POST', { message: { ...event('alice', 'unsafe URL'), parts: [{ type: 'image', url: 'http://127.0.0.1/private', mimeType: 'image/png' }] } })).status, 400);
   assert.equal((await request('artifacts', 'POST', { name: 'fake.png', mimeType: 'image/png', encoding: 'base64', content: Buffer.from('not an image').toString('base64') })).status, 400);
+}));
+
+void test('Dashboard uploads Office documents after authorization and reuses file IDs in follow-up model context', async () => withServer(async (runtime, request, model) => {
+  let uploads = 0;
+  const upstream = createServer((incoming, response) => {
+    if (incoming.url !== '/files') { response.writeHead(404); response.end(); return; }
+    incoming.resume(); incoming.on('end', () => { uploads++; response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ id: 'file-api-dashboard', expires_at: Math.floor(Date.now() / 1000) + 604800 })); });
+  });
+  await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = upstream.address(); if (!address || typeof address === 'string') throw new Error('Missing upload fixture address');
+    const config = runtime.config(); runtime.operator.setSecret('FILE_TEST_KEY', 'fixture-key');
+    await runtime.publish(RuntimeConfigSchema.parse({ ...config, agents: config.agents.map(agent => ({ ...agent, model: 'deepseek-flash' })), connections: [{ id: 'default', protocol: 'responses', baseUrl: `http://127.0.0.1:${address.port}/v1`, apiKeyEnv: 'FILE_TEST_KEY', fileUpload: {} }] }), config.revision);
+    // Remote parsing is now an explicit choice, not a side effect of the connection.
+    runtime.fileParsing.update({ enabled: true, provider: 'deepseek', maxBytes: 20_000_000, maxTextChars: 80_000, purpose: 'rich_layout_recognition', expiresAfterSeconds: 604800 }, 0);
+    const upload = await parsed(await request('artifacts', 'POST', { name: 'report.docx', mimeType: 'application/octet-stream', encoding: 'base64', content: Buffer.from('synthetic office fixture').toString('base64') }), ArtifactUploadResponseSchema);
+    assert.equal(uploads, 0, 'local upload does not send the document to the model service');
+    const message = event('alice', 'Read this document');
+    const submitted = await parsed(await request('chat', 'POST', { message: { ...message, parts: [...message.parts, { type: 'file', url: upload.url, artifactId: upload.id, name: upload.name, mimeType: upload.mimeType, modelFile: { provider: 'deepseek', connectionId: 'default', fileId: 'file-api-forged', expiresAt: Date.now() + 60000 } }] } }), RunDetailSchema);
+    await runtime.idle(); assert.equal(runtime.detail(submitted.run.id).run.status, 'completed'); assert.equal(uploads, 1);
+    assert.match(JSON.stringify(model.requests.at(-1)?.input), /input_file.*file-api-dashboard/); assert.doesNotMatch(JSON.stringify(model.requests), /file-api-forged|synthetic office fixture/);
+    await request('chat', 'POST', { message: event('alice', 'What about the second section?') }); await runtime.idle();
+    assert.match(JSON.stringify(model.requests.at(-1)?.input), /file-api-dashboard/); assert.equal(uploads, 1);
+  } finally { upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())); }
 }));
 
 void test('publishing configuration revokes in-flight work and duplicate ingress never repeats a model call', async () => withServer(async (runtime, request, model) => {
