@@ -17,6 +17,8 @@ export interface AdapterDependencies {
   readonly maxMediaBytes?: number;
   readonly resolvePublicMediaUrl?: (part: Extract<ContentPart, { type: 'image' | 'file' }>, signal: AbortSignal) => Promise<string>;
   readonly resolveMedia?: (part: Extract<ContentPart, { type: 'image' | 'file' }>, signal: AbortSignal) => Promise<DownloadedMedia>;
+  /** Optional speech-to-text for voice messages; absent or failing falls back to a placeholder. */
+  readonly voice?: { transcribe(bytes: Uint8Array, mimeType: string, signal: AbortSignal): Promise<{ readonly text: string }> };
 }
 export interface PlatformAdapter {
   readonly id: string;

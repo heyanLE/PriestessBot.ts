@@ -9,6 +9,19 @@ import { plainMarkdown } from '../messages/format.js';
 import { downloadPublic } from '../media/download.js';
 import type { AdapterDependencies, DeliveryOutcome, DownloadedMedia, NapCatConfig, PlatformTarget } from './types.js';
 const segmentSchema = z.object({ type: z.string(), data: z.record(z.string(), z.unknown()) });
+const recordResultSchema = z.object({ file: z.string().optional(), base64: z.string().optional(), url: z.string().optional() });
+
+/** NapCat hands audio back as base64 or a URL; a host path cannot be read from another machine. */
+export async function recordAudioBytes(value: string, transport: typeof fetch = fetch): Promise<Uint8Array> {
+  if (value.startsWith('base64://')) return new Uint8Array(Buffer.from(value.slice('base64://'.length), 'base64'));
+  if (/^https?:\/\//iu.test(value)) {
+    const response = await transport(value, { redirect: 'error' });
+    if (!response.ok) { await response.body?.cancel(); throw new PlatformError('invalid_payload', '音频下载失败'); }
+    return new Uint8Array(await response.arrayBuffer());
+  }
+  if (/^[A-Za-z0-9+/]{64,}={0,2}$/u.test(value)) return new Uint8Array(Buffer.from(value, 'base64'));
+  throw new PlatformError('invalid_payload', 'NapCat 返回的是本地路径，无法跨设备读取');
+}
 const eventSchema = z.object({ post_type: z.literal('message'), message_type: z.enum(['private', 'group']), message_id: protocolId, user_id: protocolId, group_id: protocolId.optional(), group_name: z.string().max(1000).optional(), self_id: protocolId, time: z.number().int().nonnegative(), sender: z.object({ nickname: z.string().optional(), card: z.string().optional() }).optional(), message: z.union([z.string(), z.array(segmentSchema)]) });
 const quotedMessageSchema = z.object({ message_id: protocolId, message_type: z.enum(['private', 'group']), group_id: protocolId.optional(), target_id: protocolId.optional(), time: z.number().int().nonnegative().optional(), sender: z.object({ user_id: protocolId, nickname: z.string().optional(), card: z.string().optional() }), message: z.union([z.string(), z.array(segmentSchema)]) });
 const forwardNodeSchema = z.object({ sender: z.object({ user_id: protocolId, nickname: z.string().optional(), card: z.string().optional() }).optional(), user_id: protocolId.optional(), nickname: z.string().optional(), time: z.number().int().nonnegative().optional(), content: z.union([z.string(), z.array(segmentSchema)]).optional(), message: z.union([z.string(), z.array(segmentSchema)]).optional() });
@@ -167,9 +180,27 @@ export class NapCatAdapter extends BasePlatformAdapter {
         if (!repeated) parts.push(await this.resolveQuote(value.id, event, parts.filter(part => part.type === 'quote').length, quoteBudget));
       } else if (segment.type === 'image' || segment.type === 'file') {
         const attachment = mediaSegment(segment); if (attachment) parts.push(attachment);
-      } else if (segment.type === 'record') parts.push({ type: 'text', text: '[音频消息：本版本不支持语音处理]' });
+      } else if (segment.type === 'record') {
+        const transcript = await this.recordTranscript(segment.data);
+        parts.push({ type: 'text', text: transcript ? `[语音] ${transcript}` : '[音频消息：未启用语音识别或转写失败]' });
+      }
     }
     return MessageEventSchema.parse({ platform: this.id, platformType: 'napcat', sessionId: event.message_type === 'group' ? event.group_id : event.user_id, sessionType: event.message_type, ...(event.group_name === undefined ? {} : { sessionName: event.group_name }), senderId: event.user_id, senderName: event.sender?.card || event.sender?.nickname || event.user_id, messageId: event.message_id, timestamp: event.time * 1000, botId: event.self_id || this.botId, parts });
+  }
+  /** Ask NapCat to convert voice to WAV, then transcribe it. Any failure degrades to a placeholder. */
+  private async recordTranscript(data: Record<string, unknown>): Promise<string | undefined> {
+    const voice = this.deps.voice;
+    if (!voice) return undefined;
+    const file = typeof data.file === 'string' ? data.file : typeof data.file_id === 'string' ? data.file_id : undefined;
+    if (!file) return undefined;
+    try {
+      const result = recordResultSchema.parse(await this.api('get_record', { file, out_format: 'wav' }, z.unknown(), false, this.controller.signal));
+      const reference = result.file ?? result.base64 ?? result.url;
+      if (!reference) return undefined;
+      const bytes = await recordAudioBytes(reference);
+      const { text } = await voice.transcribe(bytes, 'audio/wav', this.controller.signal);
+      return text.trim() || undefined;
+    } catch { return undefined; }
   }
   private async resolveQuote(messageId: string, event: z.infer<typeof eventSchema>, count: number, budget: QuoteBudget): Promise<Extract<ContentPart, { type: 'quote' }>> {
     const base = { type: 'quote', messageId } satisfies Extract<ContentPart, { type: 'quote' }>;

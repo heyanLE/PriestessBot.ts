@@ -105,7 +105,7 @@ export class PriestessRuntime {
   private readonly finalReplyParts = new Map<string, ContentPart[]>();
   setArtifactDirectory(directory: string): void { this.artifactDirectory = path.resolve(directory); }
   private mediaResolvers: Pick<AdapterDependencies, 'resolveMedia' | 'resolvePublicMediaUrl'> = {};
-  setMediaResolvers(resolvers: Pick<AdapterDependencies, 'resolveMedia' | 'resolvePublicMediaUrl'>): void { this.mediaResolvers = resolvers; }
+  setMediaResolvers(resolvers: Pick<AdapterDependencies, 'resolveMedia' | 'resolvePublicMediaUrl' | 'voice'>): void { this.mediaResolvers = resolvers; }
   readonly observability: ObservabilityService;
   readonly modelPayloads: ModelPayloadStore;
   readonly secret: (name: string) => string | undefined;
