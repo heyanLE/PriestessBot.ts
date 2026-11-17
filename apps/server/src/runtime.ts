@@ -19,6 +19,7 @@ import { MessageContextBuilder, StreamDelivery, paginate, type PreparedMessageCo
 import { MEDIA_DEFAULT_POLICY, MediaPipeline } from '../../../packages/adapters/src/media/index.js';
 import { DeepSeekFiles } from '../../../packages/adapters/src/media/deepseek-files.js';
 import { FileParsingSettingsService, shouldUploadDocuments } from './file-parsing.js';
+import { AsrSettingsService, DeepSeekAsr } from './asr.js';
 import type { DownloadedMedia } from '../../../packages/adapters/src/platforms/types.js';
 import { NativeExtensionRegistry } from '../../../packages/adapters/src/extensions/index.js';
 import { MemoryMaintenance } from '../../../packages/adapters/src/resources/memory-maintenance.js';
@@ -78,6 +79,8 @@ export class PriestessRuntime {
   readonly media = new MediaPipeline();
   readonly modelFiles: DeepSeekFiles;
   readonly fileParsing: FileParsingSettingsService;
+  readonly asr: AsrSettingsService;
+  readonly asrClient: DeepSeekAsr;
   readonly engine: AgentsSdkEngine;
   readonly delegation: DelegationService;
   readonly skills: SkillResources;
@@ -114,6 +117,8 @@ export class PriestessRuntime {
     this.secret = name => this.operator.secret(name) ?? fallbackSecret(name);
     this.modelFiles = new DeepSeekFiles(this.store, this.secret);
     this.fileParsing = new FileParsingSettingsService(this.store);
+    this.asr = new AsrSettingsService(this.store, name => this.secret(name));
+    this.asrClient = new DeepSeekAsr(() => this.asr.settings(), name => this.secret(name));
     this.management = new ManagementService(this.store);
     this.draftTester = new AgentDraftTester({ management: this.management, secret: this.secret, ...(options.model ? { model: options.model } : {}) });
     this.groupConversation = new GroupConversationService(this.store);

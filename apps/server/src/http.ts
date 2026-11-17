@@ -16,6 +16,7 @@ import { handleExtensionsHttp } from './extensions-http.js';
 import { handleMemoryMaintenanceHttp } from './memory-maintenance-http.js';
 import { handleSearchHttp } from './search-http.js';
 import { handleFileParsingHttp } from './file-parsing-http.js';
+import { handleAsrHttp } from './asr-http.js';
 import { handlePluginsHttp } from './plugins-http.js';
 import { RecordNotFound } from './observability.js';
 import { handleObservabilityHttp } from './observability-http.js';
@@ -95,6 +96,7 @@ export function createRuntimeServer(runtime: PriestessRuntime, options: ServerOp
     if (await handleAgentWorkbenchHttp({ runtime, request, response, url, body, json })) return;
     if(await handleSearchHttp({service:runtime.search,management:runtime.management,config:()=>runtime.config(),request,response,url,body,json}))return;
     if (await handleFileParsingHttp({ service: runtime.fileParsing, remoteAvailable: () => runtime.config().connections.some(item => item.fileUpload !== undefined), request, response, url, body, json })) return;
+    if (await handleAsrHttp({ service: runtime.asr, request, response, url, body, json })) return;
     if(await handlePluginsHttp({runtime,request,response,url,body,json}))return;
     if (await handleExtensionsHttp(runtime.extensions, request, response, url, body, json)) return;
     if (await handleMemoryMaintenanceHttp(runtime.memoryMaintenance, request, response, url, body, json)) return;
