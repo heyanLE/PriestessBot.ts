@@ -17,6 +17,8 @@ import { MemoryJobs } from '../../../packages/adapters/src/resources/memory-jobs
 import { PlatformManager, WeixinAdapter, NapCatAdapter, PlatformError, type PlatformStatus, type PlatformAdapter, type StateStore, type AdapterDependencies } from '../../../packages/adapters/src/platforms/index.js';
 import { MessageContextBuilder, StreamDelivery, paginate, type PreparedMessageContext } from '../../../packages/adapters/src/messages/index.js';
 import { MediaPipeline } from '../../../packages/adapters/src/media/index.js';
+import { DeepSeekFiles } from '../../../packages/adapters/src/media/deepseek-files.js';
+import type { DownloadedMedia } from '../../../packages/adapters/src/platforms/types.js';
 import { NativeExtensionRegistry } from '../../../packages/adapters/src/extensions/index.js';
 import { MemoryMaintenance } from '../../../packages/adapters/src/resources/memory-maintenance.js';
 import { GroupHistorySearchService } from '../../../packages/core/src/group-history-search.js';
@@ -39,6 +41,7 @@ import { pluginSummarizer } from './plugin-model.js';
 import type { MediaOwner } from '../../../packages/adapters/src/plugins/media-common.js';
 import { AgentWorkbenchSavedSchema, AgentWorkbenchSaveSchema, type AgentWorkbenchSave } from '../../../packages/contracts/src/agent-workbench.js';
 import { AgentDraftTester } from './agent-draft-test.js';
+import { responseSceneLibraries } from './response-scenes.js';
 
 const FollowUpRecordSchema = z.object({ runId: z.string(), message: MessageEventSchema, consumed: z.boolean().default(false) });
 
@@ -46,6 +49,13 @@ export function defaultConfiguration(): RuntimeConfig {
   return RuntimeConfigSchema.parse({ runtime: 'priestess-ts', schemaVersion: 1, agents: [{ id: 'assistant', displayName: '普瑞赛斯', model: 'gpt-4.1-mini', instructions: '你是普瑞赛斯。根据当前用户的问题提供准确、有用的帮助。', capabilities: ['chat', 'memory.read', 'memory.write', 'knowledge.read', 'conversation.stop'], resources: { memoryLibraries: ['default'], knowledgeLibraries: ['default'], tools: ['memory_recall', 'memory_save', 'memory_delete', 'knowledge_search', 'get_group_message_history'] } }], memoryLibraries: [{ id: 'default', displayName: '默认记忆库' }], knowledgeLibraries: [{ id: 'default', displayName: '默认知识库' }], flow: { routing: { defaultAgentId: 'assistant', rules: [] } } });
 }
 interface RuntimeOptions { readonly database: string; readonly config?: RuntimeConfig; readonly secret?: (name: string) => string | undefined; readonly model?: AgentsEngineDependencies['model']; }
+/** Redacted run summaries pass through when they name a known failure class. */
+export function failureSummary(summary: string): string {
+  return /credential environment|queue|limit|budget|cancel|stop|reset|supersed|shutdown|configuration|authorization|context window|token budget|exceeded|exceeds|stream interrupted|response timeout|tool is unavailable|tool call/i.test(summary)
+    ? summary
+    : 'Execution failed; verify model and resource configuration';
+}
+
 export class PriestessRuntime {
   readonly store: RuntimeStore;
   readonly management: ManagementService;
@@ -65,6 +75,7 @@ export class PriestessRuntime {
   readonly scheduler: ConversationScheduler;
   readonly messages = new MessageContextBuilder();
   readonly media = new MediaPipeline();
+  readonly modelFiles: DeepSeekFiles;
   readonly engine: AgentsSdkEngine;
   readonly delegation: DelegationService;
   readonly skills: SkillResources;
@@ -99,6 +110,7 @@ export class PriestessRuntime {
     this.operator = new OperatorManagement(this.store);
     const fallbackSecret = options.secret ?? (name => process.env[name]);
     this.secret = name => this.operator.secret(name) ?? fallbackSecret(name);
+    this.modelFiles = new DeepSeekFiles(this.store, this.secret);
     this.management = new ManagementService(this.store);
     this.draftTester = new AgentDraftTester({ management: this.management, secret: this.secret, ...(options.model ? { model: options.model } : {}) });
     this.groupConversation = new GroupConversationService(this.store);
@@ -122,9 +134,9 @@ export class PriestessRuntime {
     this.memory = new MemoryService(this.store, this.auth);
     this.memoryJobs = new MemoryJobs(this.store, this.memory, () => this.config(), this.secret, options.model);
     this.knowledge = this.createKnowledge(this.auth);
-    this.skills = new SkillResources(() => this.config(), input => this.auth.assert(input.context, 'files.read', input.agent), id => this.environments.get(id));
+    this.skills = new SkillResources(() => this.config(), input => this.auth.assert(input.context, 'files.read', input.agent), id => this.environments.get(id), input => responseSceneLibraries(this.plugins.settings, input));
     this.mcp = new McpConnections(() => this.config(), this.auth, this.store, this.secret);
-    this.engine = new AgentsSdkEngine({ store: this.store, captureModel: input => this.modelPayloads.sink(input.context.runId), config: () => this.config(), secret: this.secret, auditSecrets: () => this.auditSecrets(), ...(options.model === undefined ? {} : { model: options.model }), assertCurrent: input => this.auth.assert(input.context, 'chat', input.agent), tools: async (input, toolEmit) => { this.observability.registerAgent(input.context, input.agent, input.message); this.runInputs.set(input.context.runId, input); const available = [...buildAgentTools(input, { groupHistory: this.groupHistory, auth: this.auth, store: this.store, memory: this.memory, knowledge: this.knowledge, skills: this.skills, toolOutput:this.toolOutput, execution: id => this.environments.get(id), delegate: (parent, target, task, emit) => this.delegate(parent, target, task, emit), attachFile: (source, file, name, mimeType) => this.attachFile(source, file, name, mimeType) }, toolEmit), ...await this.mcp.tools(input, toolEmit), ...observedTools(input,[...this.extensions.tools(input),...this.search.tools(input),...this.plugins.tools(input)],this.store,toolEmit)]; const names = new Set<string>(); for (const item of available) { if (item.type === 'function') { if (names.has(item.name)) throw new Error(`Duplicate tool name: ${item.name}`); names.add(item.name); } } return wrapToolOutputs(input,available,this.toolOutput); }, followUps: (input, close) => this.followUps(input, close), dynamicContext: input => this.dynamicContext(input), groupHistory: input => {if(input.context.depth!==0||input.message.sessionType!=='group')return undefined;this.groupConversation.seedFromTranscript(input.context);return this.groupConversation.snapshot(input.context);}, historySeed: (input, apply) => { this.historyContinuation.consumeHistorySeed(input, apply); }, cleanup: input => this.mcp.close(input.context.runId) });
+    this.engine = new AgentsSdkEngine({ assertModelFiles: (input, items) => this.modelFiles.assertReferences(this.config().connections.find(item => item.id === input.agent.connectionId), this.groupConversation.scope(input.context) ?? this.modelSessionId(input.context), items), store: this.store, captureModel: input => this.modelPayloads.sink(input.context.runId), config: () => this.config(), secret: this.secret, auditSecrets: () => this.auditSecrets(), ...(options.model === undefined ? {} : { model: options.model }), assertCurrent: input => this.auth.assert(input.context, 'chat', input.agent), tools: async (input, toolEmit) => { this.observability.registerAgent(input.context, input.agent, input.message); this.runInputs.set(input.context.runId, input); const available = [...buildAgentTools(input, { groupHistory: this.groupHistory, auth: this.auth, store: this.store, memory: this.memory, knowledge: this.knowledge, skills: this.skills, toolOutput:this.toolOutput, execution: id => this.environments.get(id), delegate: (parent, target, task, emit) => this.delegate(parent, target, task, emit), attachFile: (source, file, name, mimeType) => this.attachFile(source, file, name, mimeType) }, toolEmit), ...await this.mcp.tools(input, toolEmit), ...observedTools(input,[...this.extensions.tools(input),...this.search.tools(input),...this.plugins.tools(input)],this.store,toolEmit)]; const names = new Set<string>(); for (const item of available) { if (item.type === 'function') { if (names.has(item.name)) throw new Error(`Duplicate tool name: ${item.name}`); names.add(item.name); } } return wrapToolOutputs(input,available,this.toolOutput); }, followUps: (input, close) => this.followUps(input, close), dynamicContext: input => this.dynamicContext(input), groupHistory: input => input.context.depth === 0 && input.message.sessionType === 'group' ? input.groupHistory ?? [] : undefined, historySeed: (input, apply) => { this.historyContinuation.consumeHistorySeed(input, apply); }, cleanup: async input => { try { await this.mcp.close(input.context.runId); } finally { this.skills.release(input.context); } } });
     this.delegation = new DelegationService(this.auth, id => { const target = this.config().agents.find(agent => agent.id === id); return target === undefined ? undefined : this.management.resolveAgent(target); }, id => id === this.engine.id ? this.engine : undefined);
     this.configureEnvironments();
   }
@@ -301,9 +313,11 @@ export class PriestessRuntime {
       this.observability.registerAgent(context, agent, message);
       stage = 'context'; stageStarted = performance.now(); this.node(run.id, context.turnId, stage, 'started');
       this.auth.assert(context, 'chat', agent);
-      const modelMessage = adapter === undefined ? message : await this.media.prepare(message, adapter, context.signal);
-      prepared=this.messages.prepare(modelMessage,context.generation);
-      let input: EngineInput = { agent, context, message: modelMessage, additionalContext: prepared.context, session: { engine: this.engine.id, version: this.engine.version, id: this.modelSessionId(context) } };
+      const modelMessage = await this.prepareModelMedia(message, agent, context, adapter);
+      if (context.depth === 0 && message.sessionType === 'group') this.groupConversation.seedFromTranscript(context);
+      const publicHistory = context.depth === 0 && message.sessionType === 'group' ? this.groupConversation.snapshot(context) : [];
+      prepared=this.messages.prepare(modelMessage,context.generation,publicHistory);
+      let input: EngineInput = { agent, context, message: modelMessage, additionalContext: prepared.context, groupHistory: prepared.publicHistory, session: { engine: this.engine.id, version: this.engine.version, id: this.modelSessionId(context) } };
       const upload=this.plugins.qq.beforeIngress(message);
       if(upload){input={...input,additionalContext:`${input.additionalContext}\n${upload.context}\nAuthorized upload skills: ${this.plugins.qq.authorizedUploadSkills(input,upload).join(', ')}`};}
       const detected=await this.plugins.detect(input,text);if(detected)input={...input,additionalContext:`${input.additionalContext}\nBilibili link metadata (untrusted source):\n${detected}`};
@@ -418,6 +432,8 @@ export class PriestessRuntime {
       {name:'retrieved_context',value:JSON.stringify({memories,knowledge}).slice(0,config.flow.context.maxChars),priority:'normal'},
       {name:'available_skills',value:JSON.stringify(skills),priority:'normal'},
     ];
+    const scenes = skills.find(skill => skill.library === 'plugin-response-scenes' && skill.name === 'response-scenes');
+    if (scenes) snapshot.push({ name: 'response_scenes_index', value: await this.skills.read(input, scenes.library, scenes.path), priority: 'critical' });
     const environment = config.executionEnvironments.find(item => item.id === context.resources.executionEnvironment);
     if (environment !== undefined) snapshot.push({ name: 'execution_environment', priority: 'critical', value: JSON.stringify({
       id: environment.id, backend: environment.type, shell: '/bin/sh',
@@ -433,6 +449,22 @@ export class PriestessRuntime {
     for (const [index,skill] of skills.filter(item=>query.includes(`$${item.name}`)).slice(0,3).entries()) snapshot.push({name:`requested_skill.${index}`,value:await this.skills.read(input,skill.library,skill.path),priority:'optional'});
     this.auth.assert(context,'chat',agent); return {scope:input.session.id,components:snapshot};
   }
+  private async prepareModelMedia(message: MessageEvent, agent: AgentDefinition, context: RunContext, adapter?: PlatformAdapter): Promise<MessageEvent> {
+    const attachments = message.parts.flatMap(part => part.type === 'quote' ? part.attachments ?? [] : part.type === 'file' || part.type === 'image' ? [part] : []);
+    if (!adapter && !attachments.some(part => part.url.startsWith('artifact:'))) return message;
+    const connection = this.config().connections.find(item => item.id === agent.connectionId);
+    const scope = this.groupConversation.scope(context) ?? this.modelSessionId(context);
+    const guard = (): void => { context.signal.throwIfAborted(); this.auth.assert(context, 'chat', agent); };
+    const upload = connection?.fileUpload ? async (media: DownloadedMedia) => {
+      if (!['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp'].includes(agent.model)) throw new Error('DeepSeek 文档问答需要使用 deepseek-flash 模型。');
+      return this.modelFiles.upload(connection, scope, media, context.signal, guard);
+    } : undefined;
+    return this.media.prepare(message, adapter ?? { downloadMedia: async (part, signal) => {
+      if (part.type === 'image' && part.url.startsWith('data:image/')) return { bytes: Buffer.from(part.url.slice(part.url.indexOf(',') + 1), 'base64'), mimeType: part.mimeType, name: 'image' };
+      if (!this.mediaResolvers.resolveMedia) throw new Error('附件读取服务不可用。');
+      return this.mediaResolvers.resolveMedia(part, signal);
+    } }, context.signal, upload);
+  }
   private async followUps(input: EngineInput, close = true): Promise<readonly EngineInput[]> {
     const active = this.activeInputs.get(conversationKey(input.context.principal, input.agent.id));
     if (active && active.run.id !== input.context.runId) return [];
@@ -446,8 +478,8 @@ export class PriestessRuntime {
         if (principalKey(message) !== principalKey(input.context.principal)) throw new Error('Follow-up principal mismatch');
         this.auth.assert(input.context, 'chat', input.agent);
         this.processingStarted(message, input.context, input.agent, adapter);
-        const modelMessage = adapter === undefined ? message : await this.media.prepare(message, adapter, input.context.signal);
-        prepared=this.messages.prepare(modelMessage,input.context.generation);
+        const modelMessage = await this.prepareModelMedia(message, input.agent, input.context, adapter);
+        prepared=this.messages.prepare(modelMessage,input.context.generation,[],0);
         this.auth.assert(input.context, 'chat', input.agent);
         result.push({ ...input, message: modelMessage, additionalContext: `${prepared.context}\nThis is an additional request from the same authenticated sender during the current run. Earlier tool effects already happened; do not repeat them. Address the combined request.` });
         this.store.put('run-follow-ups', `${input.context.runId}:${message.messageId}`, { runId: input.context.runId, message:modelMessage, consumed: true });
@@ -465,7 +497,9 @@ export class PriestessRuntime {
     for (const reference of references) { const secret = this.secret(reference); if (secret && secret.length > 3) summary = summary.split(secret).join('[redacted]'); }
     summary = summary.slice(0, 500);
     // Never persist arbitrary provider error bodies, which can contain request credentials.
-    const safeSummary = /credential environment|queue|limit|budget|cancel|stop|reset|supersed|shutdown|configuration|authorization/i.test(summary) ? summary : 'Execution failed; verify model and resource configuration';
+    const safeSummary = failureSummary(summary);
+    // Keep the redacted reason in the journal; the stored event stays short.
+    console.error('[run-failed]', run.id, summary);
     this.store.saveRun({ ...current, status: cancelled ? 'cancelled' : 'failed', summary: safeSummary, updatedAt: Date.now() });
     this.record({ type: 'failed', runId: RunIdSchema.parse(run.id), turnId: run.id, sequence: 0, timestamp: Date.now(), error: { code: cancelled ? 'cancelled' : 'internal', message: safeSummary, retryable: false } });
   }
@@ -490,7 +524,8 @@ export class PriestessRuntime {
     const current = this.auth.resolve(saved.context.principal, saved.agent, saved.context.runtimeState);
     if (current.grantVersion !== saved.context.grantVersion || current.runtimeState !== saved.context.runtimeState || saved.context.effectiveCapabilities.some(capability => !current.effectiveCapabilities.includes(capability))) throw new Error('Approval authorization changed');
     const { generationAgentId, parentRunId, ...rest } = saved.context;
-    const previous: EngineInput = { ...saved, context: { ...rest, ...(generationAgentId === undefined ? {} : { generationAgentId }), ...(parentRunId === undefined ? {} : { parentRunId }), grantVersion: current.grantVersion, signal: AbortSignal.timeout(saved.context.budget.timeoutMs) } };
+    const { groupHistory, ...savedInput } = saved;
+    const previous: EngineInput = { ...savedInput, ...(groupHistory === undefined ? {} : { groupHistory }), context: { ...rest, ...(generationAgentId === undefined ? {} : { generationAgentId }), ...(parentRunId === undefined ? {} : { parentRunId }), grantVersion: current.grantVersion, signal: AbortSignal.timeout(saved.context.budget.timeoutMs) } };
     this.auth.assert(previous.context, 'chat', previous.agent);
     run.status = 'queued'; this.store.saveRun({ ...run, updatedAt: Date.now() });
     const work = this.scheduler.enqueue(run.sessionKey, async signal => {

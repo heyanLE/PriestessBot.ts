@@ -12,6 +12,6 @@ void test('legacy pairs stay separate while scene markers preserve multi-turn bo
 void test('revised Fiammetta persona fits production schema and retains role and practical task scenarios',async()=>{
  const raw:unknown=JSON.parse(await readFile(new URL('../personas/fiammetta.json',import.meta.url),'utf8'));
  const persona=PersonaInputSchema.omit({name:true}).parse(raw);assert.equal(persona.exampleDialogs.length,90);assert.equal(exampleScenes(persona.exampleDialogs).length,17);
- assert.ok(exampleScenes(persona.exampleDialogs).some(s=>s.title==='操作权限'));assert.match(persona.instructions,/字数偏好不限制/);assert.match(persona.instructions,/发送者 ID/);
+ assert.ok(exampleScenes(persona.exampleDialogs).some(s=>s.title==='操作权限'));assert.match(persona.instructions,/群聊与身份/);assert.match(persona.instructions,/发送者 ID/);
  assert.ok(persona.exampleDialogs.every(d=>d.role!=='assistant'||(!d.content.includes('（')&&d.content!=='哦。')));
 });

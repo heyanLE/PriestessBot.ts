@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Model, ModelRequest, ModelResponse, protocol } from '@openai/agents';
+import { estimateContextTokens } from './token-count.js';
 import type { AuditPreview } from '../../../contracts/src/audit.js';
 import type { RunEvent } from '../../../contracts/src/index.js';
 import { safeAuditError, safeAuditPreview } from './audit.js';
@@ -31,8 +32,11 @@ export class AuditedModel implements Model {
   private async start(request: ModelRequest): Promise<ModelCallSpan> {
     const source=this.options.source(); const callId=randomUUID();const modelCall=this.options.nextCall(source);
     const capture = this.options.rawCapture ? { sink: this.options.rawCapture, identity: { callId, modelCall, model: this.options.model, source }, attempt: 0 } : undefined;
+    // Sizes for reconciling a request against its reported usage and the window guard.
+    const requestBytes = JSON.stringify({ instructions: request.systemInstructions ?? '', input: request.input, tools: request.tools }).length;
+    const estimatedTokens = estimateContextTokens(request.input) + estimateContextTokens(request.systemInstructions ?? '') + estimateContextTokens(request.tools);
     const inputPreview = capture ? undefined : safeAuditPreview({ systemInstructions:request.systemInstructions ?? '', input:request.input, tools:request.tools.map(tool=>({type:tool.type,name:tool.name})), settings:{maxTokens:request.modelSettings.maxTokens,temperature:request.modelSettings.temperature,topP:request.modelSettings.topP,toolChoice:request.modelSettings.toolChoice,reasoningEffort:request.modelSettings.reasoning?.effort} },{knownSecrets:this.options.knownSecrets,maxChars:8000,recentArrayKeys:['input']});
-    this.options.emit({type:'model_call',callId,model:this.options.model,source,status:'started',modelCall,...(inputPreview ? {inputPreview} : {})});
+    this.options.emit({type:'model_call',callId,model:this.options.model,source,status:'started',modelCall,requestBytes,estimatedTokens,...(inputPreview ? {inputPreview} : {})});
     // signal is an execution handle, not model input. Every model-visible SDK
     // field, including complete tools and provider settings, remains intact.
     const { signal, ...payload } = request;
