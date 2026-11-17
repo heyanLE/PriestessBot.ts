@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { ContentPart, MediaAttachment, MessageEvent } from '../../../contracts/src/index.js';
 import { PlatformError } from '../platforms/transport.js';
-import type { PlatformAdapter } from '../platforms/types.js';
+import type { PlatformAdapter, DownloadedMedia } from '../platforms/types.js';
+import type { ModelFileReference } from '../../../contracts/src/model-files.js';
+import { officeKind, officeText, OfficeError } from './office.js';
 export interface MediaPolicy { readonly maxBytes: number; readonly maxTextChars: number; readonly maxPdfPages: number; readonly maxAttachments?: number; }
 const defaultPolicy: MediaPolicy = { maxBytes: 20_000_000, maxTextChars: 80_000, maxPdfPages: 100 };
 export function imageMime(bytes: Uint8Array): string | undefined {
@@ -16,7 +18,7 @@ class MediaBudgetError extends PlatformError { constructor(message: string) { su
 /** Materialize authenticated protocol media before invoking a model; URLs never become paths. */
 export class MediaPipeline {
   constructor(private readonly policy: MediaPolicy = defaultPolicy) {}
-  async prepare(event: MessageEvent, adapter: PlatformAdapter, signal: AbortSignal): Promise<MessageEvent> {
+  async prepare(event: MessageEvent, adapter: Pick<PlatformAdapter, 'downloadMedia'>, signal: AbortSignal, uploadFile?: (media: DownloadedMedia) => Promise<ModelFileReference>): Promise<MessageEvent> {
     const parts: ContentPart[] = [];
     let totalBytes = 0;
     let totalTextChars = 0;
@@ -34,11 +36,15 @@ export class MediaPipeline {
         if (!mimeType) throw new PlatformError('invalid_payload', 'Image content does not match a supported image format');
         return { ...part, mimeType, url: `data:${mimeType};base64,${Buffer.from(downloaded.bytes).toString('base64')}` };
       }
+      if (uploadFile) {
+        const modelFile = await uploadFile(downloaded);
+        return { type: 'file', name: downloaded.name, url: `attachment:sha256:${digest}`, mimeType: downloaded.mimeType, size: downloaded.bytes.length, ...(part.artifactId ? { artifactId: part.artifactId } : {}), modelFile };
+      }
       const text = await this.extract(downloaded.bytes, downloaded.mimeType, downloaded.name);
       signal.throwIfAborted();
       totalTextChars += text.length;
       if (totalTextChars > this.policy.maxTextChars) throw new MediaBudgetError('Combined extracted attachments exceed text limit');
-      return { ...part, url: `attachment:sha256:${digest}`, mimeType: downloaded.mimeType, size: downloaded.bytes.length, extractedText: text };
+      return { ...part, modelFile: undefined, url: `attachment:sha256:${digest}`, mimeType: downloaded.mimeType, size: downloaded.bytes.length, extractedText: text };
     };
     for (const part of event.parts) {
       signal.throwIfAborted();
@@ -62,6 +68,14 @@ export class MediaPipeline {
   }
   async extract(bytes: Uint8Array, mimeType: string, name: string): Promise<string> {
     if (bytes.length > this.policy.maxBytes) throw new PlatformError('rejected', 'Media exceeds size limit');
+    const document = officeKind(name);
+    if (document !== undefined) {
+      try { return officeText(document, bytes, this.policy.maxTextChars); }
+      catch (error) {
+        if (error instanceof OfficeError) throw new PlatformError('rejected', error.message);
+        throw error;
+      }
+    }
     const header = Buffer.from(bytes.subarray(0, 5)).toString('ascii');
     if (header === '%PDF-') {
       const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
@@ -79,7 +93,7 @@ export class MediaPipeline {
         return pages.join('\n\n');
       } finally { await task.destroy(); }
     }
-    if (!mimeType.startsWith('text/') && !/\.(?:txt|md|markdown|csv|tsv|json|ya?ml|log)$/i.test(name) && mimeType !== 'application/json') throw new PlatformError('rejected', 'This file format is not supported; send text, Markdown or PDF');
+    if (!mimeType.startsWith('text/') && !/\.(?:txt|md|markdown|csv|tsv|json|ya?ml|log)$/i.test(name) && mimeType !== 'application/json') throw new PlatformError('rejected', 'This file format is not supported; send text, Markdown, PDF, Word, PowerPoint or Excel');
     let text: string;
     try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
     catch { throw new PlatformError('invalid_payload', 'Text attachment is not valid UTF-8'); }
