@@ -71,6 +71,7 @@ const builtins: readonly { name: string; label: string; capability: Capability; 
   { name: 'process_read_output', label: '读取进程输出', capability: 'process.execute.restricted', requirement: '只能读取当前身份拥有的进程输出。' },
   { name: 'process_kill', label: '终止进程', capability: 'process.execute.restricted', requirement: 'SDK Docker 会终止当前任务容器的所有命令，保留工作文件。' },
   { name: 'delegate_agent', label: '委派 Agent', capability: 'agent.delegate', requirement: '目标须在委派列表内，子 Agent 不提升父任务权限。' },
+  { name: 'run_command', label: '执行指令', capability: 'chat', requirement: '调用机器人指令系统；不执行 Shell。stop、new、reset 被拒绝，具体指令仍检查运行态和权限。' },
   { name: 'list_skills', label: '浏览 Skill', capability: 'files.read', requirement: '列出当前会话隔离区、执行环境共享区和已装配的外部技能库。人格限制仍然生效。' },
   { name: 'read_skill', label: '读取 Skill', capability: 'files.read', requirement: '先浏览 Skill，再按返回的库和路径读取。两区均使用 .agent/skill 目录。读取不会执行脚本。' },
   { name: 'write_skill', label: '创建或更新 Skill', capability: 'files.write', requirement: '资深干员可写当前会话隔离区。高级资深干员还可写共享区。文件校验通过后自动可见。' },

@@ -10,7 +10,7 @@ void test('native plugin management is authenticated, strongly validated and rev
  const request=(route:string,method='GET',body?:unknown)=>fetch(base+route,{method,headers:{Authorization:'Bearer plugin-test-token','Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
  try{
   assert.equal((await fetch(base+'plugins')).status,401);
-  const catalogue=PluginCatalogueSchema.parse(await(await request('plugins')).json());assert.equal(catalogue.plugins.length,5);assert.ok(catalogue.plugins.every(p=>!p.record.settings.enabled));
+  const catalogue=PluginCatalogueSchema.parse(await(await request('plugins')).json());assert.equal(catalogue.plugins.length,6);assert.ok(catalogue.plugins.every(p=>!p.record.settings.enabled));
   const tools=PluginToolCatalogueSchema.parse(await(await request('plugins/tools')).json());assert.ok(tools.tools.some(t=>t.id==='qq_group_notices'));assert.ok(tools.tools.some(t=>t.id==='web_search'));
   const enabled=await request('plugins/qq_file','PUT',{expectedRevision:0,settings:{enabled:true}});assert.equal(enabled.status,200);assert.equal(PluginRecordSchema.parse(await enabled.json()).revision,1);
   assert.equal((await request('plugins/qq_file','PUT',{expectedRevision:0,settings:{enabled:false}})).status,409);

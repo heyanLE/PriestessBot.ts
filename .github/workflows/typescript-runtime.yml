@@ -16,11 +16,11 @@ jobs:
         with:
           node-version: '22.22.2'
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            dashboard/package-lock.json
+          cache-dependency-path: package-lock.json
       - run: npm ci
-      - run: npm --prefix dashboard ci
       - run: npm run check
-      - run: npm run test:dashboard
       - run: npm run build
+      - if: runner.os == 'Linux'
+        run: npx --no-install playwright install --with-deps --only-shell chromium
+      - if: runner.os == 'Linux'
+        run: npm --prefix dashboard test

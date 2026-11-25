@@ -1,0 +1,12 @@
+import { cp, mkdir, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import path from 'node:path';
+const root = path.dirname(new URL(import.meta.url).pathname);
+await promisify(execFile)(process.execPath, ['--check', path.join(root, 'app.js')]);
+await rm(path.join(root, 'dist'), { recursive: true, force: true });
+await mkdir(path.join(root, 'dist'), { recursive: true });
+for (const file of ['index.html', 'app.js', 'styles.css']) await cp(path.join(root, file), path.join(root, 'dist', file));
+await cp(path.join(root, 'assets'), path.join(root, 'dist', 'assets'), { recursive: true }).catch(() => undefined);
+await cp(path.join(root, 'vendor'), path.join(root, 'dist', 'vendor'), { recursive: true }).catch(() => undefined);
+console.log('Dashboard built:', path.join(root, 'dist'));

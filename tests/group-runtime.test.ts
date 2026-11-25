@@ -16,6 +16,27 @@ function done(text:string){return protocol.StreamEvent.parse({type:'response_don
 function call(name:string,args:unknown){return protocol.StreamEvent.parse({type:'response_done',response:{id:crypto.randomUUID(),usage:{inputTokens:20,outputTokens:10,totalTokens:30},output:[{type:'function_call',name,arguments:JSON.stringify(args),callId:crypto.randomUUID(),status:'completed'}]}});}
 function message(sender:string,text:string,group='group-a',sessionType:'group'|'private'='group'):MessageEvent{return MessageEventSchema.parse({platform:'test',platformType:'napcat',sessionId:group,sessionType,senderId:sender,senderName:sender,messageId:crypto.randomUUID(),timestamp:Date.now(),botId:'bot',parts:[{type:'text',text},...(sessionType==='group'?[{type:'mention',userId:'bot'}]:[])]});}
 function adapter(replies:ReplyPlan[]=[],fail=false):PlatformAdapter{return{id:'test',capabilities:{edit:false,images:true,files:true,groups:true,audio:false},start:()=>Promise.resolve(),stop:()=>Promise.resolve(),send:(_target,reply)=>{replies.push(reply);return Promise.resolve(fail?{status:'uncertain',reason:'transport interrupted',messageIds:[]}:{status:'confirmed',messageIds:['sent']});},edit:()=>Promise.reject(new Error('Unused')),downloadMedia:()=>Promise.resolve({bytes:Buffer.from([255,216,255,224]),mimeType:'image/jpeg',name:'image.jpg'})};}
+void test('automatic group context shares five message slots across public turns and untriggered chatter', async () => {
+ const model=new ScriptModel((_request,index)=>Promise.resolve([done(`PUBLIC_LIMIT_REPLY_${index}`)]));
+ const runtime=new PriestessRuntime({database:':memory:',model});
+ const transport=adapter();
+ try{
+  for(let i=0;i<3;i++){runtime.submit(message('alice',`PUBLIC_LIMIT_INPUT_${i}`),transport);await runtime.idle();}
+  const base=Date.now()+1000;
+  for(let i=0;i<4;i++)runtime.submit({...message('bob',`CHATTER_LIMIT_${i}`),timestamp:base+i,parts:[{type:'text',text:`CHATTER_LIMIT_${i}`}]},transport);
+  const current=message('carol','CURRENT_LIMIT_REQUEST');
+  current.timestamp=base+10;
+  current.parts.unshift({type:'quote',messageId:'old-quote',senderId:'alice',text:'EXPLICIT_QUOTE_RETAINED',availability:'available'});
+  const run=runtime.submit(current,transport);await runtime.idle();
+  assert.equal(runtime.detail(run.id).run.status,'completed');
+  const actual=JSON.stringify(model.requests.at(-1)?.input);
+  assert.equal(actual.match(/(?:PUBLIC_LIMIT_(?:INPUT|REPLY)_\d|CHATTER_LIMIT_\d)/g)?.length,5);
+  assert.match(actual,/PUBLIC_LIMIT_REPLY_2/);
+  assert.doesNotMatch(actual,/PUBLIC_LIMIT_INPUT_|PUBLIC_LIMIT_REPLY_[01]/);
+  for(let i=0;i<4;i++)assert.ok(actual.includes(`CHATTER_LIMIT_${i}`));
+  assert.match(actual,/CURRENT_LIMIT_REQUEST|EXPLICIT_QUOTE_RETAINED/);
+ }finally{await runtime.stop();}
+});
 void test('shared group model sees other senders public dialogue but not private memory, tool traces, private chats or other groups',async()=>{
  const model=new ScriptModel((_r,index)=>Promise.resolve([index===0?call('memory_recall',{query:'secret'}):done(index===1?'PUBLIC_ALICE_REPLY':`PUBLIC_REPLY_${index}`)]));const runtime=new PriestessRuntime({database:':memory:',model});
  try{runtime.store.put('memories','secret',MemoryRecordSchema.parse({id:'secret',libraryId:'default',agentId:'assistant',principal:{platform:'test',sessionType:'group',sessionId:'group-a',senderId:'alice'},scope:'sender',text:'PRIVATE_TOOL_AND_MEMORY_SECRET',source:'fixture',confidence:1,createdAt:1,updatedAt:1}));

@@ -81,3 +81,13 @@ await test('startup rejects invalid, writable-by-others and hard-linked existing
     assert.equal(await readFile(installed.path, 'utf8'), original);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+await test('workspace v2 seeds the packaged skill under global/skill', async () => {
+  const directory = await fixture();
+  try {
+    const result = await seedBuiltinSkills({ root: directory, backend: 'local', layout: 'v2' });
+    assert.equal(result.created, true);
+    assert.equal(result.path, path.join(directory, 'global', 'skill', 'skill-packager', 'SKILL.md'));
+    assert.equal(await readFile(result.path, 'utf8'), await readFile(new URL('../resources/.agent/skill/skill-packager/SKILL.md', import.meta.url), 'utf8'));
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

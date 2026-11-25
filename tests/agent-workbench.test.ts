@@ -82,6 +82,22 @@ void test('Agent and persona binding save atomically with both revisions and do 
   } finally { await runtime.stop(); }
 });
 
+void test('overlapping saves each return the binding committed with their configuration revision', async () => {
+  const runtime = new PriestessRuntime({ database: ':memory:' });
+  try {
+    const agent = firstAgent(runtime);
+    const revision = runtime.config().revision;
+    const persona = runtime.management.savePersona({ name: 'First persona', instructions: 'first' });
+    const first = runtime.saveAgentWorkbench({ agent, personaId: persona.id, expectedRevision: revision, expectedBindingRevision: 0 });
+    const second = runtime.saveAgentWorkbench({ agent, personaId: null, expectedRevision: revision + 1, expectedBindingRevision: 1 });
+    const [bound, unbound] = await Promise.all([first, second]);
+    assert.equal(bound.revision, revision + 1);
+    assert.deepEqual(bound.binding, { agentId: agent.id, personaId: persona.id, revision: 1 });
+    assert.equal(unbound.revision, revision + 2);
+    assert.deepEqual(unbound.binding, { agentId: agent.id, personaId: null, revision: 2 });
+  } finally { await runtime.stop(); }
+});
+
 void test('single-Agent save rejects unpublished resource references and missing personas without committing either record', async () => {
   const runtime = new PriestessRuntime({ database: ':memory:' }); const before = runtime.config(); const agent = firstAgent(runtime);
   try {

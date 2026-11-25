@@ -48,3 +48,34 @@ usage rejection, restart reconstruction, cross-session isolation, hard-limit-onl
 storage behavior, turn limits, pending tools, opening anchors, recent context,
 turn truncation and context-unit attachment. `tests/context-policy.test.ts`
 continues to check real SDK integration and summary failure/authorization races.
+
+## Within-run context reuse (2026-11-13)
+
+Each model round now builds one dynamic snapshot. Budget reservation and provider
+input use that same snapshot. The next round refreshes mutable memories and
+retrieval after tools or additional user input. Finalization prepares one fresh
+snapshot, and approval resumption starts with fresh per-execution state.
+
+Skill discovery caches catalogue entries for the current RunContext. Each lookup
+checks current authorization and a host metadata fingerprint of the directory,
+entry directories and SKILL.md files. Edits, additions, removals, permission
+changes and same-size writes with a restored mtime invalidate the cache. Explicit
+skill reads still read current content. Backends without metadata support retain
+the normal discovery path. Run cleanup releases cached entries.
+
+NAS measurements with six shared skills and four configured-library skills gave
+1.24 seconds per warm catalogue lookup before this change. The candidate took
+2–3 milliseconds on cache hits and refreshed correctly after an external edit.
+This measures catalogue discovery, not end-to-end model generation.
+
+Validation passed 580 backend checks and 81 Dashboard checks. Four local Docker
+checks skipped because the daemon was unavailable. NAS probes validated the
+production SDK Docker cache and fresh model snapshots. Broader legacy backend
+checks also exposed an existing full-shell Docker UID permission failure and an
+intermittent PTY output-length failure. The Docker permission failure reproduced
+on the previous production release; those execution paths were not changed.
+
+Deployed release: `20261113-context-reuse`. Configuration revision remains r17.
+Backup: `/home/heyanhub/apps/priestess/backups/context-reuse-20261112-162735`.
+NAS health and NapCat connection checks passed; stored configuration, persona,
+conversation, memory, knowledge and model-record IDs were preserved.

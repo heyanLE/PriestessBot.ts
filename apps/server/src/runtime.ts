@@ -3,7 +3,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { AgentDefinitionSchema, MessageEventSchema, ArtifactIdSchema, RunIdSchema, SessionIdSchema, RuntimeConfigSchema, CapabilitySchema, type AgentDefinition, type EngineInput, type EngineResult, type MessageEvent, type RunContext, type RunEvent, type RuntimeConfig, type FlowNodeId, type ContentPart } from '../../../packages/contracts/src/index.js';
-import { AuthorizationService, simulateFlow, validateConfiguration, historyKey, principalKey, conversationKey, intersectResources, RuntimeStore, StoredRunSchema, FlowService, ConversationScheduler, createBuiltinCommands, MemoryService, KnowledgeService, DelegationService, LocalHashEmbedding, type StoredRun } from '../../../packages/core/src/index.js';
+import { AuthorizationService, simulateFlow, validateConfiguration, historyKey, principalKey, conversationKey, intersectResources, RuntimeStore, StoredRunSchema, FlowService, ConversationScheduler, createBuiltinCommands, textReply, MemoryService, KnowledgeService, DelegationService, LocalHashEmbedding, type StoredRun } from '../../../packages/core/src/index.js';
+import type { CommandOutcome } from '../../../packages/core/src/commands.js';
 import { AgentsSdkEngine, type AgentsEngineDependencies } from '../../../packages/adapters/src/agents/engine.js';
 import { buildAgentTools } from '../../../packages/adapters/src/agents/tools.js';
 import { McpConnections } from '../../../packages/adapters/src/agents/mcp.js';
@@ -44,6 +45,9 @@ import type { MediaOwner } from '../../../packages/adapters/src/plugins/media-co
 import { AgentWorkbenchSavedSchema, AgentWorkbenchSaveSchema, type AgentWorkbenchSave } from '../../../packages/contracts/src/agent-workbench.js';
 import { AgentDraftTester } from './agent-draft-test.js';
 import { responseSceneLibraries } from './response-scenes.js';
+import { workspaceZoneSegments } from '../../../packages/adapters/src/execution/workspace-layout.js';
+import { cleanupWorkspaceCaches } from '../../../packages/adapters/src/execution/workspace-cache.js';
+import { DEFAULT_CACHE_CLEANUP_INTERVAL_MS, DEFAULT_CACHE_TTL_MS } from '../../../packages/adapters/src/execution/workspace-layout.js';
 
 const FollowUpRecordSchema = z.object({ runId: z.string(), message: MessageEventSchema, consumed: z.boolean().default(false) });
 
@@ -90,6 +94,8 @@ export class PriestessRuntime {
   knowledge: KnowledgeService;
   private readonly platforms = new PlatformManager();
   private readonly environments = new Map<string, ExecutionBackend>();
+  private workspaceService: ExecutionBackend | undefined;
+  private cacheTimer: ReturnType<typeof setInterval> | undefined;
   private readonly retiredEnvironments = new Set<Promise<void>>();
   private readonly retiredBackends = new Set<ExecutionBackend>();
   private readonly pending = new Set<Promise<void>>();
@@ -142,9 +148,9 @@ export class PriestessRuntime {
     this.memory = new MemoryService(this.store, this.auth);
     this.memoryJobs = new MemoryJobs(this.store, this.memory, () => this.config(), this.secret, options.model);
     this.knowledge = this.createKnowledge(this.auth);
-    this.skills = new SkillResources(() => this.config(), input => this.auth.assert(input.context, 'files.read', input.agent), id => this.environments.get(id), input => responseSceneLibraries(this.plugins.settings, input));
+    this.skills = new SkillResources(() => this.config(), input => this.auth.assert(input.context, 'files.read', input.agent), id => this.environmentFor(id), input => responseSceneLibraries(this.plugins.settings, input));
     this.mcp = new McpConnections(() => this.config(), this.auth, this.store, this.secret);
-    this.engine = new AgentsSdkEngine({ assertModelFiles: (input, items) => this.modelFiles.assertReferences(this.config().connections.find(item => item.id === input.agent.connectionId), this.groupConversation.scope(input.context) ?? this.modelSessionId(input.context), items), store: this.store, captureModel: input => this.modelPayloads.sink(input.context.runId), config: () => this.config(), secret: this.secret, auditSecrets: () => this.auditSecrets(), ...(options.model === undefined ? {} : { model: options.model }), assertCurrent: input => this.auth.assert(input.context, 'chat', input.agent), tools: async (input, toolEmit) => { this.observability.registerAgent(input.context, input.agent, input.message); this.runInputs.set(input.context.runId, input); const available = [...buildAgentTools(input, { groupHistory: this.groupHistory, auth: this.auth, store: this.store, memory: this.memory, knowledge: this.knowledge, skills: this.skills, toolOutput:this.toolOutput, execution: id => this.environments.get(id), delegate: (parent, target, task, emit) => this.delegate(parent, target, task, emit), attachFile: (source, file, name, mimeType) => this.attachFile(source, file, name, mimeType) }, toolEmit), ...await this.mcp.tools(input, toolEmit), ...observedTools(input,[...this.extensions.tools(input),...this.search.tools(input),...this.plugins.tools(input)],this.store,toolEmit)]; const names = new Set<string>(); for (const item of available) { if (item.type === 'function') { if (names.has(item.name)) throw new Error(`Duplicate tool name: ${item.name}`); names.add(item.name); } } return wrapToolOutputs(input,available,this.toolOutput); }, followUps: (input, close) => this.followUps(input, close), dynamicContext: input => this.dynamicContext(input), groupHistory: input => input.context.depth === 0 && input.message.sessionType === 'group' ? input.groupHistory ?? [] : undefined, historySeed: (input, apply) => { this.historyContinuation.consumeHistorySeed(input, apply); }, cleanup: async input => { try { await this.mcp.close(input.context.runId); } finally { this.skills.release(input.context); } } });
+    this.engine = new AgentsSdkEngine({ assertModelFiles: (input, items) => this.modelFiles.assertReferences(this.config().connections.find(item => item.id === input.agent.connectionId), this.groupConversation.scope(input.context) ?? this.modelSessionId(input.context), items), store: this.store, captureModel: input => this.modelPayloads.sink(input.context.runId), config: () => this.config(), secret: this.secret, auditSecrets: () => this.auditSecrets(), ...(options.model === undefined ? {} : { model: options.model }), assertCurrent: input => this.auth.assert(input.context, 'chat', input.agent), tools: async (input, toolEmit) => { this.observability.registerAgent(input.context, input.agent, input.message); this.runInputs.set(input.context.runId, input); const available = [...buildAgentTools(input, { groupHistory: this.groupHistory, auth: this.auth, store: this.store, memory: this.memory, knowledge: this.knowledge, skills: this.skills, toolOutput:this.toolOutput, execution: id => this.environmentFor(id), delegate: (parent, target, task, emit) => this.delegate(parent, target, task, emit), attachFile: (source, file, name, mimeType) => this.attachFile(source, file, name, mimeType), commands: { run: (source, command) => this.runToolCommand(source, command) } }, toolEmit), ...await this.mcp.tools(input, toolEmit), ...observedTools(input,[...this.extensions.tools(input),...this.search.tools(input),...this.plugins.tools(input)],this.store,toolEmit)]; const names = new Set<string>(); for (const item of available) { if (item.type === 'function') { if (names.has(item.name)) throw new Error(`Duplicate tool name: ${item.name}`); names.add(item.name); } } return wrapToolOutputs(input,available,this.toolOutput); }, followUps: (input, close) => this.followUps(input, close), dynamicContext: input => this.dynamicContext(input), groupHistory: input => input.context.depth === 0 && input.message.sessionType === 'group' ? input.groupHistory ?? [] : undefined, historySeed: (input, apply) => { this.historyContinuation.consumeHistorySeed(input, apply); }, cleanup: async input => { try { await this.mcp.close(input.context.runId); } finally { this.skills.release(input.context); } } });
     this.delegation = new DelegationService(this.auth, id => { const target = this.config().agents.find(agent => agent.id === id); return target === undefined ? undefined : this.management.resolveAgent(target); }, id => id === this.engine.id ? this.engine : undefined);
     this.configureEnvironments();
   }
@@ -172,6 +178,17 @@ export class PriestessRuntime {
     const context: RunContext = { runId: RunIdSchema.parse(randomUUID()), turnId: randomUUID(), principal, agentId: agent.id, generation: 0, configRevision: this.config().revision, flowRevision: this.config().flow.revision, ...authorization.resolve(principal, agent), budget: agent.budget, signal: AbortSignal.timeout(120_000), depth: 0 };
     return { service: this.createKnowledge(authorization), context, agent };
   }
+  private stopCacheCleanup(): void { if (this.cacheTimer !== undefined) { clearInterval(this.cacheTimer); this.cacheTimer = undefined; } }
+  private startCacheCleanup(): void {
+    this.stopCacheCleanup();
+    const workspace = this.config().workspace;
+    if (workspace === undefined) return;
+    const run = (): void => { void cleanupWorkspaceCaches(workspace.root, { ttlMs: DEFAULT_CACHE_TTL_MS }).catch(error => { console.error('Workspace cache cleanup failed.', error instanceof Error ? error.message : String(error)); }); };
+    this.cacheTimer = setInterval(run, DEFAULT_CACHE_CLEANUP_INTERVAL_MS);
+    this.cacheTimer.unref?.();
+    run();
+  }
+  private environmentFor(id: string): ExecutionBackend | undefined { return this.workspaceService ?? this.environments.get(id); }
   private configureEnvironments(): void {
     for (const service of this.environments.values()) {
       this.retiredBackends.add(service);
@@ -181,6 +198,23 @@ export class PriestessRuntime {
       void cleanup.then(() => this.retiredEnvironments.delete(cleanup));
     }
     this.environments.clear();
+    this.workspaceService = undefined;
+    this.stopCacheCleanup();
+    const workspace = this.config().workspace;
+    if (workspace !== undefined) {
+      const id = this.config().executionEnvironments[0]?.id ?? 'workspace';
+      const settings: ExecutionConfig = { root: workspace.root, backend: workspace.sandbox ? 'sdk_docker' : 'local', id, layout: 'v2', networkEnabled: workspace.networkEnabled, ...(workspace.image === undefined ? {} : { dockerImage: workspace.image }) };
+      const authorize: Authorize = (context, capability) => { const agent = this.config().agents.find(item => item.id === context.agentId); if (!agent) throw new Error('Agent removed'); this.auth.assert(context, capability, agent); };
+      const service: ExecutionBackend = workspace.sandbox ? new SdkDockerExecutionService(settings, authorize) : new ExecutionService(settings, authorize);
+      service.onCompletion((context, result) => Promise.resolve().then(() => this.backgroundCompletion(context, result)));
+      this.workspaceService = service;
+      this.environments.set(id, service);
+      const preparation = seedBuiltinSkills(settings);
+      this.environmentReady = preparation.then(() => undefined);
+      void this.environmentReady.catch(() => { /* Startup and context construction report initialization failures. */ });
+      this.startCacheCleanup();
+      return;
+    }
     const preparations: Promise<unknown>[] = [];
     for (const environment of this.config().executionEnvironments) {
       const settings: ExecutionConfig = { root: environment.root, backend: environment.type, networkEnabled: environment.networkEnabled, ...(environment.image === undefined ? {} : { dockerImage: environment.image }), id: environment.id };
@@ -193,8 +227,12 @@ export class PriestessRuntime {
     this.environmentReady = Promise.all(preparations).then(() => undefined);
     void this.environmentReady.catch(() => { /* Startup and context construction report initialization failures. */ });
   }
+
   async publish(config: RuntimeConfig, expectedRevision: number, commitRelated?: () => void): Promise<RuntimeConfig> {
-    const published = this.flow.publish(config, expectedRevision, commitRelated);
+    // Older dashboard bundles do not know about the workspace field. Preserve it unless a caller explicitly provides a new one.
+    const current = this.config();
+    const next = config.workspace === undefined && current.workspace !== undefined ? { ...config, workspace: current.workspace } : config;
+    const published = this.flow.publish(next, expectedRevision, commitRelated);
     for (const run of this.store.runs().filter(item => item.status === 'running' || item.status === 'queued')) this.scheduler.cancel(run.sessionKey, 'Configuration changed');
     this.scheduler.configure(published.flow.execution.globalConcurrency, published.flow.execution.perSessionQueueLimit, published.flow.execution.globalQueueLimit);
     this.configureEnvironments(); this.knowledge = this.createKnowledge(this.auth);
@@ -207,8 +245,11 @@ export class PriestessRuntime {
     const agents = existing ? current.agents.map(agent => agent.id === data.agent.id ? data.agent : agent) : [...current.agents, data.agent];
     // Only the selected Agent is merged into published resources; unrelated client drafts never enter this mutation.
     const candidate = RuntimeConfigSchema.parse({ ...current, agents });
-    const config = await this.publish(candidate, data.expectedRevision, () => { this.management.bindPersona(data.agent.id, data.personaId, data.expectedBindingRevision); });
-    return AgentWorkbenchSavedSchema.parse({ revision: config.revision, config, binding: this.management.bindings().find(binding => binding.agentId === data.agent.id), impact: 'running_and_queued_cancelled_approvals_invalidated' });
+    let binding: ReturnType<ManagementService['bindPersona']> | undefined;
+    const config = await this.publish(candidate, data.expectedRevision, () => {
+      binding = this.management.bindPersona(data.agent.id, data.personaId, data.expectedBindingRevision);
+    });
+    return AgentWorkbenchSavedSchema.parse({ revision: config.revision, config, binding, impact: 'running_and_queued_cancelled_approvals_invalidated' });
   }
   async restartPlatforms(): Promise<void> { await this.platforms.stop(); await this.startPlatforms(); }
   async startPlatforms(): Promise<void> {
@@ -273,9 +314,29 @@ export class PriestessRuntime {
     const command = createBuiltinCommands(this.auth, this.store, this.scheduler);
     const text = message.parts.filter(part => part.type === 'text').map(part => part.text).join('\n');
     const execute = (signal: AbortSignal): Promise<void> => this.execute(run, config, agent, message, signal, adapter);
-    const work = (command.isControl(text, config.flow.commands.prefix) ? execute(AbortSignal.timeout(config.flow.execution.timeoutMs)) : this.scheduler.enqueue(sessionKey, execute, principalKey({ platform: message.platform, sessionId: message.sessionId, sessionType: message.sessionType, senderId: message.senderId }))).catch(error => this.fail(run, error));
+    const work = (command.isControl(text, config.flow.commands.prefix)
+      ? this.scheduler.runControl(id, execute)
+      : this.scheduler.enqueue(sessionKey, execute, principalKey(message), id)).catch(error => this.fail(run, error));
     this.pending.add(work); void work.finally(() => this.pending.delete(work));
     return run;
+  }
+  async runToolCommand(input: EngineInput, command: string): Promise<CommandOutcome> {
+    const text = command.trim().replace(/^\/+/, '');
+    const name = text.split(/\s/, 1)[0]?.toLowerCase() ?? '';
+    if (!name) return { status: 'rejected', reply: textReply('指令为空。') };
+    if (name === 'stop' || name === 'new' || name === 'reset') return { status: 'rejected', reply: textReply('run_command 不允许调用 stop、new 或 reset。') };
+    const config = this.config();
+    const prefix = config.flow.commands.prefix;
+    try {
+      const builtin = await createBuiltinCommands(this.auth, this.store, this.scheduler).dispatch(`${prefix}${text}`, input.context, input.agent, prefix);
+      if (builtin.status !== 'unhandled') return builtin;
+      const normalized = `/${text}`;
+      const extension = await this.extensions.dispatch(normalized, input.context, input.agent);
+      if (extension.status !== 'unhandled') return extension;
+      return await this.plugins.command(input, normalized);
+    } catch (error) {
+      return { status: 'failed', reply: textReply(error instanceof Error ? error.message : '指令执行失败') };
+    }
   }
   private async execute(run: StoredRun, config: RuntimeConfig, agent: AgentDefinition, message: MessageEvent, signal: AbortSignal, adapter?: PlatformAdapter, parent?: RunContext): Promise<void> {
     const principal = { platform: message.platform, sessionId: message.sessionId, senderId: message.senderId, sessionType: message.sessionType };
@@ -294,6 +355,7 @@ export class PriestessRuntime {
     if(parent===undefined && command.status==='unhandled' && text.startsWith(config.flow.commands.prefix)) command=await this.plugins.command(commandInput,normalizedCommand);
     this.node(run.id, context.turnId, stage, 'completed', command.status, performance.now() - stageStarted);
     if (command.status !== 'unhandled') {
+      context.signal.throwIfAborted();
       this.observability.commandHandled(run.id);
       if(this.store.generation(run.sessionKey)!==context.generation)this.messages.reset(message,this.store.generation(run.sessionKey));
       this.messages.history.forget(message);
@@ -443,7 +505,27 @@ export class PriestessRuntime {
     const scenes = skills.find(skill => skill.library === 'plugin-response-scenes' && skill.name === 'response-scenes');
     if (scenes) snapshot.push({ name: 'response_scenes_index', value: await this.skills.read(input, scenes.library, scenes.path), priority: 'critical' });
     const environment = config.executionEnvironments.find(item => item.id === context.resources.executionEnvironment);
-    if (environment !== undefined) snapshot.push({ name: 'execution_environment', priority: 'critical', value: JSON.stringify({
+    if (config.workspace !== undefined) {
+      const zones = Object.fromEntries((['global', 'agent', 'conversation'] as const).map(zone => {
+        const root = `/workspace/${workspaceZoneSegments(context, zone).join('/')}`;
+        return [zone, { files: `${root}/file`, skills: `${root}/skill`, cache: `${root}/cache`, ...(zone === 'conversation' ? {} : { mcp: `${root}/mcp` }) }];
+      }));
+      snapshot.push({ name: 'execution_environment', priority: 'critical', value: JSON.stringify({
+        mode: config.workspace.sandbox ? 'sandbox' : 'host',
+        toolPathBase: '/workspace',
+        shellRoot: config.workspace.sandbox ? '/workspace' : path.resolve(config.workspace.root),
+        zones,
+        permissions: { read: ['global', 'agent:self', 'conversation:current'], write: { elite_operator: ['skill', 'mcp', 'cache', 'file'], operator: ['cache'] } },
+        cache: { ttlDays: 7, cleanup: 'hourly' },
+        skillPrecedence: ['conversation', 'agent', 'global'],
+        mcpPrecedence: ['agent', 'global'],
+        paths: 'File tools accept /workspace/global, /workspace/agents/<agentId> and /workspace/conversations/<platform>/<sessionType>/<sessionId> paths. Shell commands use shellRoot. The conversation zone has no mcp directory.',
+        skillProcedure: 'Use list_skills with an optional zone (global, agent, conversation). Read/write with the exact zone and path returned. Only elite_operator can write skill, mcp and file; non-elite can write only agent/conversation cache.',
+        dependencies: 'The shell is /bin/sh. Bash syntax requires bash explicitly. Check commands and Python modules before use. Prefer python3. Use a workspace virtual environment for Python packages.',
+        networkPolicy: config.workspace.sandbox ? (config.workspace.networkEnabled ? 'Docker bridge network allowed; check destination reachability' : 'disabled') : 'host network; reachability depends on the host',
+        persistence: 'Global, Agent and conversation files persist. Cache expires after 7 days. Processes are temporary. Use exec_command result.id as session_id.',
+      }) });
+    } else if (environment !== undefined) snapshot.push({ name: 'execution_environment', priority: 'critical', value: JSON.stringify({
       id: environment.id, backend: environment.type, shell: '/bin/sh',
       workspace: environment.type === 'local' ? 'conversation working directory; use pwd for shell paths' : '/workspace/files',
       zones: { isolated: { filePath: '/workspace/files', skills: '.agent/skill', scope: 'current conversation, Agent and reset generation' }, shared: { filePath: '/workspace/shared', skills: '/workspace/shared/.agent/skill', scope: 'all conversations assigned this execution environment', writable: context.runtimeState === 'elite_operator' && context.effectiveCapabilities.includes('resources.manage') } },
@@ -501,9 +583,9 @@ export class PriestessRuntime {
     }
     return result;
   }
-  private fail(run: StoredRun, error: unknown): void {
+  private fail(run: StoredRun, error: unknown, cancellationRecorded = false): void {
     const current = this.store.get('runs', run.id, StoredRunSchema) ?? run;
-    const cancelled = error instanceof Error && /cancel|stop|reset|supersed|shutdown/i.test(error.message);
+    const cancelled = cancellationRecorded || error instanceof Error && /cancel|stop|reset|supersed|shutdown/i.test(error.message);
     let summary = error instanceof Error ? error.message.replace(/Bearer\s+\S+/gi, 'Bearer [redacted]') : 'Execution failed';
     const config = this.config();
     const references = ['PRIESTESS_API_TOKEN', ...config.connections.map(item => item.apiKeyEnv), ...config.platforms.map(item => item.type === 'napcat' ? item.accessTokenEnv : item.tokenEnv), ...config.mcpServers.flatMap(item => [...Object.values(item.envRefs), ...Object.values(item.headersEnv)])];
@@ -514,7 +596,10 @@ export class PriestessRuntime {
     // Keep the redacted reason in the journal; the stored event stays short.
     console.error('[run-failed]', run.id, summary);
     this.store.saveRun({ ...current, status: cancelled ? 'cancelled' : 'failed', summary: safeSummary, updatedAt: Date.now() });
-    this.record({ type: 'failed', runId: RunIdSchema.parse(run.id), turnId: run.id, sequence: 0, timestamp: Date.now(), error: { code: cancelled ? 'cancelled' : 'internal', message: safeSummary, retryable: false } });
+    const event = { runId: RunIdSchema.parse(run.id), turnId: run.id, sequence: 0, timestamp: Date.now() };
+    if (cancelled) {
+      if (!cancellationRecorded) this.record({ ...event, type: 'cancelled', reason: safeSummary });
+    } else this.record({ ...event, type: 'failed', error: { code: 'internal', message: safeSummary, retryable: false } });
   }
   private node(runId: string, turnId: string, nodeId: FlowNodeId, status: 'started' | 'completed' | 'failed', summary = '', durationMs = 0): void { this.record({ type: 'node', runId: RunIdSchema.parse(runId), turnId, sequence: 0, timestamp: Date.now(), nodeId, status, summary, durationMs: Math.max(0, durationMs) }); }
   record(event: RunEvent): void {
@@ -526,10 +611,35 @@ export class PriestessRuntime {
   }
   subscribe(runId: string, listener: (event: RunEvent) => void): () => void { const listeners = this.listeners.get(runId) ?? new Set(); listeners.add(listener); this.listeners.set(runId, listeners); return () => { listeners.delete(listener); if (!listeners.size) this.listeners.delete(runId); }; }
   detail(id: string): { run: StoredRun; events: RunEvent[] } { const run = this.store.get('runs', id, StoredRunSchema); if (!run) throw new Error('Run not found'); return { run, events: this.store.events(id) }; }
-  cancel(id: string): void { const { run } = this.detail(id); this.scheduler.cancel(run.sessionKey); if (run.status === 'paused') { const prefix = 'Approval required: '; if (run.summary.startsWith(prefix)) this.store.delete('sdk-pauses', run.summary.slice(prefix.length)); const saved=this.store.get('paused-inputs',id,PersistedEngineInputSchema);if(saved&&saved.context.depth===0&&saved.context.principal.sessionType==='group')for(const namespace of ['sdk-history','sdk-context-usage','sdk-context-summary'])this.store.delete(namespace,saved.session.id);this.store.delete('paused-inputs', id); this.runInputs.delete(id); this.store.saveRun({ ...run, status: 'cancelled', summary: 'Stopped by operator', updatedAt: Date.now() }); this.record({ type: 'cancelled', runId: RunIdSchema.parse(id), turnId: id, sequence: 0, timestamp: Date.now(), reason: 'Stopped by operator' }); } }
-  async environmentsStatus(): Promise<{ id: string; type: ExecutionConfig['backend']; available: boolean; isolation: 'trusted-host' | 'container' }[]> { return Promise.all([...this.environments.entries()].map(async ([id, environment]) => ({ id, type: environment.config.backend, available: await environment.available(), isolation: environment.config.backend === 'local' ? 'trusted-host' as const : 'container' as const }))); }
-  processes(runId: string): ReturnType<ExecutionBackend['list']> { this.detail(runId); const input = this.runInputs.get(runId); if (!input) return []; const service = this.environments.get(input.context.resources.executionEnvironment); return service ? service.list(input.context) : []; }
-  killProcess(runId: string, id: string): ReturnType<ExecutionBackend['kill']> { const input = this.runInputs.get(runId); if (!input) throw new Error('Live run context not found'); const service = this.environments.get(input.context.resources.executionEnvironment); if (!service) throw new Error('Execution environment not found'); return service.kill(input.context, id); }
+  cancel(id: string): void {
+    const run = this.store.get('runs', id, StoredRunSchema);
+    if (!run) throw new Error('Run not found');
+    const reason = 'Stopped by operator';
+    if (run.status === 'running' || run.status === 'queued') {
+      this.scheduler.cancelRun(run.sessionKey, id, reason);
+      if (run.parentRunId) this.delegation.cancelRun(id, reason);
+      if (run.status === 'running') return;
+    } else if (run.status !== 'paused') return;
+
+    // A resumed approval may still be queued behind another turn.
+    const saved = this.store.get('paused-inputs', id, PersistedEngineInputSchema);
+    if (saved || run.status === 'paused') {
+      const prefix = 'Approval required: ';
+      if (run.summary.startsWith(prefix)) this.store.delete('sdk-pauses', run.summary.slice(prefix.length));
+      if (saved?.context.depth === 0 && saved.context.principal.sessionType === 'group') {
+        for (const namespace of ['sdk-history', 'sdk-context-usage', 'sdk-context-summary']) this.store.delete(namespace, saved.session.id);
+      }
+      this.store.delete('paused-inputs', id);
+      this.runInputs.delete(id);
+    }
+    if (run.status === 'paused') {
+      this.store.saveRun({ ...run, status: 'cancelled', summary: reason, updatedAt: Date.now() });
+      this.record({ type: 'cancelled', runId: RunIdSchema.parse(id), turnId: id, sequence: 0, timestamp: Date.now(), reason });
+    }
+  }
+  async environmentsStatus(): Promise<{ id: string; type: ExecutionConfig['backend']; available: boolean; isolation: 'trusted-host' | 'container' }[]> { if (this.workspaceService !== undefined) return [{ id: this.workspaceService.config.id ?? 'workspace', type: this.workspaceService.config.backend, available: await this.workspaceService.available(), isolation: 'trusted-host' }]; return Promise.all([...this.environments.entries()].map(async ([id, environment]) => ({ id, type: environment.config.backend, available: await environment.available(), isolation: environment.config.backend === 'local' ? 'trusted-host' as const : 'container' as const }))); }
+  processes(runId: string): ReturnType<ExecutionBackend['list']> { this.detail(runId); const input = this.runInputs.get(runId); if (!input) return []; const service = this.environmentFor(input.context.resources.executionEnvironment); return service ? service.list(input.context) : []; }
+  killProcess(runId: string, id: string): ReturnType<ExecutionBackend['kill']> { const input = this.runInputs.get(runId); if (!input) throw new Error('Live run context not found'); const service = this.environmentFor(input.context.resources.executionEnvironment); if (!service) throw new Error('Execution environment not found'); return service.kill(input.context, id); }
   approve(runId: string, approvalId: string, approved: boolean): void {
     const saved = this.store.get('paused-inputs', runId, PersistedEngineInputSchema); const { run } = this.detail(runId);
     if (!saved || run.status !== 'paused' || run.summary !== `Approval required: ${approvalId}`) throw new Error('Approval run not found or already resumed');
@@ -578,8 +688,15 @@ export class PriestessRuntime {
         else if (run.status === 'cancelled') this.record({ type: 'cancelled', runId: input.context.runId, turnId: input.context.turnId, sequence: 0, timestamp: Date.now(), reason: 'Run cancelled' });
         else this.record({ type: 'failed', runId: input.context.runId, turnId: input.context.turnId, sequence: 0, timestamp: Date.now(), error: { code: 'internal', message: run.summary, retryable: false } });
 
-      } finally { if (run.status !== 'paused') {this.finalReplyParts.delete(runId);this.outputParts.delete(runId);this.clearGroupSession(input.context);} }
-    }, principalKey(previous.context.principal)).catch(error => this.fail(run, error)); this.pending.add(work); void work.finally(() => this.pending.delete(work));
+      } finally {
+        if (input.context.signal.aborted) {
+          this.store.delete('sdk-pauses', approvalId);
+          this.store.delete('paused-inputs', runId);
+          this.runInputs.delete(runId);
+        }
+        if (run.status !== 'paused') {this.finalReplyParts.delete(runId);this.outputParts.delete(runId);this.clearGroupSession(input.context);}
+      }
+    }, principalKey(previous.context.principal), runId).catch(error => this.fail(run, error)); this.pending.add(work); void work.finally(() => this.pending.delete(work));
   }
   private backgroundCompletion(context: RunContext, result: { id: string; status: string; output: string }): void {
     if (this.closing) return;
@@ -600,15 +717,17 @@ export class PriestessRuntime {
     const run: StoredRun = { ...parent, id: randomUUID(), parentRunId: parent.id, status: 'queued', createdAt: Date.now(), updatedAt: Date.now(), summary: `Continuation of ${parent.id}` };
     const config = this.store.getConfig(context.configRevision); if (!config) return;
     this.store.saveRun(run);
-    const work = this.scheduler.enqueue(parent.sessionKey, signal => this.execute(run, config, input.agent, message, signal, adapter, { ...context, budget: { ...context.budget, maxTokens: context.budget.tokenLimitMode==='cumulative'?context.budget.maxTokens-used:context.budget.maxTokens } }), principalKey(context.principal)).catch(error => this.fail(run, error));
+    const work = this.scheduler.enqueue(parent.sessionKey, signal => this.execute(run, config, input.agent, message, signal, adapter, { ...context, budget: { ...context.budget, maxTokens: context.budget.tokenLimitMode==='cumulative'?context.budget.maxTokens-used:context.budget.maxTokens } }), principalKey(context.principal), run.id).catch(error => this.fail(run, error));
     this.pending.add(work); void work.finally(() => this.pending.delete(work));
   }
   async idle(): Promise<void> { while (this.pending.size) await Promise.all([...this.pending]); }
   private async delegate(parent: EngineInput, target: string, task: string, emit: (event: RunEvent) => void): Promise<EngineResult> {
     let childId: string | undefined;
+    let cancellationRecorded = false;
     try {
       const result = await this.delegation.delegate(parent.context, parent.agent, target, task, parent.message, event => {
-        childId = event.runId;
+        childId ??= event.runId;
+        if (event.runId === childId && event.type === 'cancelled') cancellationRecorded = true;
         if (!this.store.get('runs', event.runId, StoredRunSchema)) {
           this.store.saveRun({ id: event.runId, parentRunId: parent.context.runId, sessionKey: `child:${event.runId}`, agentId: target, senderId: parent.context.principal.senderId, generation: parent.context.generation, status: 'running', createdAt: Date.now(), updatedAt: Date.now(), summary: `Child of ${parent.context.runId}` });
           this.store.put('run-parents', event.runId, parent.context.runId);
@@ -618,11 +737,11 @@ export class PriestessRuntime {
       if (childId) { const stored = this.store.get('runs', childId, StoredRunSchema); if (stored) this.store.saveRun({ ...stored, status: result.status, summary: result.status === 'paused' ? `Approval required: ${result.state ?? ''}` : result.text.slice(0, 4000), updatedAt: Date.now() }); }
       if (childId && result.status === 'paused') { const childInput = this.runInputs.get(childId); if (childInput) this.store.put('paused-inputs', childId, persistInput(childInput)); }
       return result;
-    } catch (error) { if (childId) { const stored = this.store.get('runs', childId, StoredRunSchema); if (stored) this.fail(stored, error); } throw error; }
+    } catch (error) { if (childId) { const stored = this.store.get('runs', childId, StoredRunSchema); if (stored) this.fail(stored, error, cancellationRecorded); } throw error; }
   }
   private async attachFile(input: EngineInput, relativePath: string, name: string, mimeType: string, enqueue = true): Promise<{ id: string; name: string; size: number; inlineMarkdown?: string }> {
     this.auth.assert(input.context, 'files.read', input.agent);
-    const environment = this.environments.get(input.context.resources.executionEnvironment); if (!environment) throw new Error('Execution environment unavailable');
+    const environment = this.environmentFor(input.context.resources.executionEnvironment); if (!environment) throw new Error('Execution environment unavailable');
     const rootRun = input.context.parentRunId ?? input.context.runId; const parts = this.outputParts.get(rootRun) ?? [];
     if (enqueue && parts.length >= 8) throw new Error('Too many output artifacts');
     const bytes = await environment.readBytes(input.context, relativePath); const id = ArtifactIdSchema.parse(randomUUID());
@@ -698,7 +817,7 @@ export class PriestessRuntime {
     if(!this.mediaResolvers.resolvePublicMediaUrl)throw new Error('Artifact public resolver unavailable');
     return this.mediaResolvers.resolvePublicMediaUrl({type:'file',url:`artifact:${id}`,name,mimeType:'application/octet-stream'},input.context.signal);
   }
-  async stop(): Promise<void> { this.closing = true; await this.environmentReady.catch(() => undefined); this.draftTester.stop(); this.pluginShutdown.abort(); await this.plugins.stop(); this.memoryJobs.stop(); await this.memoryMaintenance.stop(); await this.extensions.stop(); for (const service of this.environments.values()) service.stop(); await this.platforms.stop(); await this.scheduler.shutdown(); await this.idle(); await this.mcp.stop(); await this.modelPayloads.drain(); await Promise.all([...this.environments.values()].map(service => service.drain())); await Promise.all(this.retiredEnvironments); for (const service of this.retiredBackends) service.stop(); try { await Promise.all([...this.retiredBackends].map(service => service.drain())); } finally { this.store.close(); } }
+  async stop(): Promise<void> { this.closing = true; this.stopCacheCleanup(); await this.environmentReady.catch(() => undefined); this.draftTester.stop(); this.pluginShutdown.abort(); await this.plugins.stop(); this.memoryJobs.stop(); await this.memoryMaintenance.stop(); await this.extensions.stop(); for (const service of this.environments.values()) service.stop(); await this.platforms.stop(); await this.scheduler.shutdown(); await this.idle(); await this.mcp.stop(); await this.modelPayloads.drain(); await Promise.all([...this.environments.values()].map(service => service.drain())); await Promise.all(this.retiredEnvironments); for (const service of this.retiredBackends) service.stop(); try { await Promise.all([...this.retiredBackends].map(service => service.drain())); } finally { this.store.close(); } }
   contentHash(value: string): string { return createHash('sha256').update(value).digest('hex'); }
 }
 

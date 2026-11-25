@@ -29,6 +29,85 @@ class FollowModel implements Model {
 }
 function config(maxTurns = 12, approval = false) { const agent = AgentDefinitionSchema.parse({ id: 'agent', displayName: 'Agent', capabilities: ['chat','memory.read','memory.write','conversation.stop'], resources: { memoryLibraries: ['default'], tools: ['memory_save'] }, approvalTools: approval ? ['memory_save'] : [], budget: { maxTurns } }); return RuntimeConfigSchema.parse({ runtime: 'priestess-ts', schemaVersion: 1, agents: [agent], memoryLibraries: [{ id: 'default', displayName: 'Memory' }], flow: { routing: { defaultAgentId: agent.id, rules: [] } } }); }
 
+for (const target of ['queued', 'running'] as const) {
+  void test(`cancelling a ${target} run preserves the other turns in the same group`, async () => {
+    const model = new FollowModel();
+    const runtime = new PriestessRuntime({ database: ':memory:', config: config(), model });
+    const groupMessage = (sender: string, text: string) => {
+      const event = message(text, sender);
+      event.sessionType = 'group';
+      event.parts.push({ type: 'mention', userId: event.botId });
+      return event;
+    };
+    try {
+      const completed = runtime.submit(groupMessage('alice', '/state'));
+      await runtime.idle();
+      assert.equal(runtime.detail(completed.id).run.status, 'completed');
+      const first = runtime.submit(groupMessage('alice', 'first'));
+      await model.started.promise;
+      const second = runtime.submit(groupMessage('bob', 'second'));
+      const third = runtime.submit(groupMessage('bob', 'third'));
+      assert.equal(runtime.detail(second.id).run.status, 'queued');
+      runtime.cancel(completed.id);
+      const selected = target === 'queued' ? second : first;
+      runtime.cancel(selected.id);
+      runtime.cancel(selected.id);
+      model.proceed.release();
+      await runtime.idle();
+      assert.equal(runtime.detail(first.id).run.status, target === 'running' ? 'cancelled' : 'completed');
+      assert.equal(runtime.detail(second.id).run.status, target === 'queued' ? 'cancelled' : 'completed');
+      assert.equal(runtime.detail(third.id).run.status, 'completed');
+      assert.deepEqual(runtime.detail(selected.id).events.filter(event => ['completed', 'failed', 'cancelled'].includes(event.type)).map(event => event.type), ['cancelled']);
+      assert.equal(model.requests.length, target === 'queued' ? 2 : 3);
+    } finally { model.proceed.release(); await runtime.stop(); }
+  });
+}
+
+for (const resume of [false, true]) {
+  void test(`cancelling a ${resume ? 'queued approval resume' : 'paused run'} leaves a concurrent turn running`, async () => {
+    const model = new FollowModel(true);
+    const runtime = new PriestessRuntime({ database: ':memory:', config: config(12, true), model });
+    try {
+      const paused = runtime.submit(message('request approval'));
+      await runtime.idle();
+      const approval = runtime.detail(paused.id).events.find(event => event.type === 'paused');
+      assert.ok(approval?.type === 'paused');
+      const active = runtime.submit(message('another turn', 'bob'));
+      await model.started.promise;
+      if (resume) runtime.approve(paused.id, approval.approvalId, true);
+      runtime.cancel(paused.id);
+      model.proceed.release();
+      await runtime.idle();
+      assert.equal(runtime.detail(paused.id).run.status, 'cancelled');
+      assert.equal(runtime.detail(active.id).run.status, 'completed');
+      assert.throws(() => runtime.approve(paused.id, approval.approvalId, true));
+      assert.deepEqual(runtime.memory.list(), []);
+      for (const namespace of ['paused-inputs', 'sdk-pauses']) {
+        assert.equal(runtime.store.db.prepare('SELECT id FROM documents WHERE namespace=?').get(namespace), undefined);
+      }
+    } finally { model.proceed.release(); await runtime.stop(); }
+  });
+}
+
+void test('a run cancelled while the SDK closes its clients cannot reappear as awaiting approval', async () => {
+  const runtime = new PriestessRuntime({ database: ':memory:', config: config(12, true), model: new FollowModel(true) });
+  const closing = latch();
+  const release = latch();
+  const close = runtime.mcp.close.bind(runtime.mcp);
+  runtime.mcp.close = async id => { await close(id); closing.release(); await release.promise; };
+  try {
+    const run = runtime.submit(message('request approval'));
+    await closing.promise;
+    runtime.cancel(run.id);
+    release.release();
+    await runtime.idle();
+    const detail = runtime.detail(run.id);
+    assert.equal(detail.run.status, 'cancelled');
+    assert.equal(detail.events.some(event => event.type === 'paused'), false);
+    assert.equal(runtime.store.db.prepare("SELECT id FROM documents WHERE namespace IN ('paused-inputs','sdk-pauses')").get(), undefined);
+  } finally { release.release(); await runtime.stop(); }
+});
+
 void test('same sender follows the active logical run after tool completion; others queue with isolated history', async () => {
   const model = new FollowModel(true); const runtime = new PriestessRuntime({ database: ':memory:', config: config(), model });
   try {

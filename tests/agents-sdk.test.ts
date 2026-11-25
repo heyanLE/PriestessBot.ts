@@ -10,6 +10,7 @@ import { AgentsSdkEngine, type SdkLocalContext } from '../packages/adapters/src/
 import { SqliteAgentSession } from '../packages/adapters/src/agents/session.js';
 import { AgentDefinitionSchema, MessageEventSchema, RunIdSchema, RuntimeConfigSchema, type EngineInput, type RunEvent } from '../packages/contracts/src/index.js';
 import { AuthorizationService, RuntimeStore, historyKey } from '../packages/core/src/index.js';
+import { PriestessRuntime } from '../apps/server/src/runtime.js';
 
 class ScriptedModel implements Model {
   readonly requests: ModelRequest[] = [];
@@ -35,8 +36,20 @@ function fixture(model: Model, tools: (input: EngineInput) => Tool<SdkLocalConte
   const context = { runId: RunIdSchema.parse('run'), turnId: 'turn', principal, agentId: agent.id, generation: 0, configRevision: 0, flowRevision: 0, ...auth.resolve(principal, agent), signal: controller.signal, budget: agent.budget, depth: 0 };
   const input: EngineInput = { agent, context, message, additionalContext: '<memory>Likes tea</memory>', session: { engine: 'agents_sdk', version: '0.21.0', id: historyKey(context) } };
   const engine = new AgentsSdkEngine({ store, config: () => config, secret: () => undefined, assertCurrent: candidate => auth.assert(candidate.context, 'chat', candidate.agent), tools: candidate => Promise.resolve(tools(candidate)), model });
-  return { store, agent, auth, input, engine, controller };
+  return { store, agent, auth, input, engine, controller, config };
 }
+
+void test('engine applies connection parameters and adds provider tools without replacing local tools', async () => {
+  const model = new ScriptedModel(() => Promise.resolve([textCompletion('Done')]));
+  const state = fixture(model, () => [tool({ name: 'lookup', description: 'Local lookup', parameters: z.object({}), execute: () => 'Found' })]);
+  state.config.connections[0] = { id: 'default', apiKeyEnv: 'TEST_KEY', protocol: 'responses', customParameters: { reasoning: { effort: 'high' }, tools: [{ type: 'deepseek_web_search' }, { type: 'deepseek_read_url' }] } };
+  try {
+    await state.engine.run(state.input, () => undefined);
+    assert.deepEqual(model.requests[0]?.modelSettings.providerData, { reasoning: { effort: 'high' } });
+    assert.deepEqual(model.requests[0]?.tools.map(item => item.type), ['function', 'hosted_tool', 'hosted_tool']);
+    assert.ok((model.requests[0]?.modelSettings.maxTokens ?? Infinity) <= state.input.context.budget.maxTokens);
+  } finally { state.store.close(); }
+});
 
 void test('official SDK emits actual delta, completes one model loop and persists its session', async () => {
   const model = new ScriptedModel(() => Promise.resolve([{ type: 'output_text_delta', delta: 'Hello ' }, { type: 'output_text_delta', delta: 'world' }, textCompletion('Hello world')]));
@@ -48,6 +61,23 @@ void test('official SDK emits actual delta, completes one model loop and persist
   assert.ok((await new SqliteAgentSession(store, input.session.id, () => undefined).getItems()).length >= 2);
   assert.equal(model.requests[0]?.tracing, false); store.close();
 });
+
+void test('five-message group window beginning with a reply sends a user-led model request', async () => {
+  const model = new ScriptedModel(request => {
+    assert.ok(Array.isArray(request.input));
+    const dialogue = request.input.filter(item => 'role' in item && ['user', 'assistant'].includes(item.role));
+    const first = dialogue[0]; assert.ok(first && 'role' in first); assert.equal(first.role, 'user');
+    assert.match(JSON.stringify(request.input), /original_role.*assistant/);
+    assert.match(JSON.stringify(request.input), /reply-1/);
+    assert.match(JSON.stringify(request.input), /Current request/);
+    return Promise.resolve([textCompletion('Accepted')]);
+  });
+  const state = fixture(model);
+  const history = [0, 1, 2, 3, 4].map(index => ({ role: index % 2 === 0 ? 'assistant' as const : 'user' as const, text: index === 0 ? 'reply-1' : `history-${index}`, messageId: `m-${index}`, senderId: 'sender', senderName: 'Sender', timestamp: index }));
+  const engine = new AgentsSdkEngine({ store: state.store, config: () => state.config, secret: () => undefined, assertCurrent: () => undefined, tools: () => Promise.resolve([]), model, groupHistory: () => history });
+  try { assert.equal((await engine.run(state.input, () => undefined)).status, 'completed'); }
+  finally { state.store.close(); }
+});
 void test('SDK directly executes typed tools with trusted local context and preserves structured output', async () => {
   const model = new ScriptedModel((_request, index) => Promise.resolve([index === 0 ? functionCall('lookup', { keyword: 'tea' }) : textCompletion('Found tea')]));
   const argumentsSchema = z.object({ keyword: z.string() }); let invoked = 0;
@@ -55,6 +85,73 @@ void test('SDK directly executes typed tools with trusted local context and pres
   const result = await engine.run(input, () => undefined);
   assert.equal(invoked, 1); assert.equal(model.requests.length, 2); assert.equal(result.text, 'Found tea');
   assert.match(JSON.stringify(model.requests[1]?.input), /tea/); assert.doesNotMatch(JSON.stringify(model.requests[0]?.input), /grantVersion|effectiveCapabilities/); store.close();
+});
+void test('parallel search lists share one budget, survive approval restart, and can be read by ID', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'turn-search-'));
+  const agent = AgentDefinitionSchema.parse({
+    id: 'research', displayName: 'Research', resources: { tools: ['web_search', 'deepseek_search', 'read_tool_result'] },
+    approvalTools: ['deepseek_search'], budget: { tokenLimitMode: 'context' },
+  });
+  const config = RuntimeConfigSchema.parse({ runtime: 'priestess-ts', schemaVersion: 1, agents: [agent], flow: { routing: { defaultAgentId: agent.id, rules: [] } } });
+  const model = new ScriptedModel((request, index) => {
+    const results = Array.isArray(request.input) ? request.input.filter(item => item.type === 'function_call_result') : [];
+    const output = (id: string) => z.object({ text: z.string() }).parse(results.find(item => item.callId === id)?.output).text;
+    if (index === 0) return Promise.resolve([completion(['first', 'second'].map(id => ({
+      type: 'function_call', name: 'web_search', callId: id, arguments: JSON.stringify({ query: id, count: null }), status: 'completed',
+    })))]);
+    if (index === 1) {
+      const outputs = ['first', 'second'].map(output);
+      assert.equal(outputs.filter(text => text.includes('FULL_SEARCH_BODY')).length, 1);
+      assert.equal(outputs.filter(text => text.includes('resultId=')).length, 1);
+      return Promise.resolve([functionCall('deepseek_search', { query: 'third', count: null }, 'approved')]);
+    }
+    if (index === 2) {
+      const preview = output('approved');
+      assert.match(preview, /Title third/);
+      assert.doesNotMatch(preview, /FULL_SEARCH_BODY/);
+      const id = /resultId=([\da-f-]+)/u.exec(preview)?.[1];
+      assert.ok(id);
+      return Promise.resolve([functionCall('read_tool_result', { id, offset: 0, limit: 2000, max_tokens: null }, 'read')]);
+    }
+    if (index === 3) assert.match(output('read'), /FULL_SEARCH_BODY third/);
+    if (index === 4) return Promise.resolve([functionCall('web_search', { query: 'new turn', count: null }, 'fresh')]);
+    if (index === 5) assert.match(output('fresh'), /FULL_SEARCH_BODY new turn/);
+    return Promise.resolve([textCompletion('done')]);
+  });
+  const searches: string[] = [];
+  function start() {
+    const runtime = new PriestessRuntime({ database: join(directory, 'runtime.sqlite'), config, model });
+    runtime.setArtifactDirectory(join(directory, 'artifacts'));
+    runtime.search.search = (_input, query) => {
+      searches.push(query);
+      return Promise.resolve({
+        results: Array.from({ length: 10 }, (_, i) => ({
+          index: String(i), title: `Title ${query}`, url: 'https://example.org',
+          summary: `FULL_SEARCH_BODY ${query} ${'文'.repeat(query === 'third' ? 4 : 750)}`,
+        })), citationInstruction: 'Cite sources.',
+      });
+    };
+    return runtime;
+  }
+  let runtime = start();
+  try {
+    runtime.search.update({ enabled: true }, runtime.search.settings().revision);
+    const message = MessageEventSchema.parse({ platform: 'test', platformType: 'telegram', sessionId: 'room', sessionType: 'private', senderId: 'alice', messageId: 'request', timestamp: 1, botId: 'bot', parts: [{ type: 'text', text: 'Research' }] });
+    const run = runtime.submit(message);
+    await runtime.idle();
+    const pause = runtime.detail(run.id).events.find(event => event.type === 'paused');
+    assert.ok(pause?.type === 'paused', runtime.detail(run.id).run.summary);
+    await runtime.stop();
+    runtime = start();
+    runtime.approve(run.id, pause.approvalId, true);
+    await runtime.idle();
+    assert.equal(runtime.detail(run.id).run.status, 'completed', runtime.detail(run.id).run.summary);
+    const next = runtime.submit({ ...message, messageId: 'next' });
+    await runtime.idle();
+    assert.equal(runtime.detail(next.id).run.status, 'completed', runtime.detail(next.id).run.summary);
+    assert.equal(model.requests.length, 6);
+    assert.deepEqual(searches.sort(), ['first', 'new turn', 'second', 'third']);
+  } finally { await runtime.stop(); await rm(directory, { recursive: true, force: true }); }
 });
 void test('changing dynamic recall continues the same session while another group sender gets isolated history', async () => {
   const model = new ScriptedModel((_request, index) => Promise.resolve([textCompletion(`answer-${index}`, `response-${index}`)]));

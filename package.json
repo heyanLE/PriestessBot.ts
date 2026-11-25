@@ -17,9 +17,7 @@
     "migrate": "tsx tools/migrate.ts",
     "postinstall": "node tools/patch-sdk-types.ts",
     "build:server": "tsc -p tsconfig.build.json",
-    "build:dashboard": "npm --prefix dashboard run build",
-    "dev:dashboard": "npm --prefix dashboard run dev",
-    "test:dashboard": "npm --prefix dashboard run test:workflows"
+    "build:dashboard": "npm --prefix dashboard run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

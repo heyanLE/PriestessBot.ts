@@ -1,12 +1,110 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PriestessBot 控制台</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Priestess</title>
+<link rel="icon" href="assets/priestess-icon.jpg">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-workbench" viewBox="0 0 24 24"><path d="M3 12h4l2.2-7 4.2 14 2.2-7H21"/></symbol>
+  <symbol id="i-agents" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.2"/><path d="M5.5 20c.6-3.6 3.1-5.4 6.5-5.4s5.9 1.8 6.5 5.4"/></symbol>
+  <symbol id="i-im" viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/><path d="M8 10h8M8 13h5"/></symbol>
+  <symbol id="i-capabilities" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="4" y="14" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/></symbol>
+  <symbol id="i-resources" viewBox="0 0 24 24"><path d="M4 5c3-2 5-2 8 0 3-2 5-2 8 0v14c-3-2-5-2-8 0-3-2-5-2-8 0z"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-system" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 7 2 7 2 8H4c0-1 2-1 2-8M10 21h4"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20z"/><path d="M12 9v5M12 17h.01"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"/></symbol>
+  <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14 6a4 4 0 0 0-5 5l-6 6 2 2 6-6a4 4 0 0 0 5-5z"/><path d="m14 10 4 4"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></symbol>
+</svg>
+<div class="app">
+  <aside class="rail" aria-label="工作区">
+    <div class="rail-logo" aria-label="Priestess"><img src="assets/priestess-icon.jpg" alt="Priestess"></div>
+    <nav class="rail-modes" aria-label="模式">
+      <button class="rail-mode active" type="button" data-screen="workbench" title="工作台"><svg class="icon"><use href="#i-workbench"/></svg><span>工作台</span></button>
+      <button class="rail-mode" type="button" data-screen="agents" title="智能体"><svg class="icon"><use href="#i-agents"/></svg><span>智能体</span></button>
+      <button class="rail-mode" type="button" data-screen="im" title="IM"><svg class="icon"><use href="#i-im"/></svg><span>IM</span></button>
+      <button class="rail-mode" type="button" data-screen="capabilities" title="能力"><svg class="icon"><use href="#i-capabilities"/></svg><span>能力</span></button>
+      <button class="rail-mode" type="button" data-screen="resources" title="资源"><svg class="icon"><use href="#i-resources"/></svg><span>资源</span></button>
+      <button class="rail-mode" type="button" data-screen="system" title="系统"><svg class="icon"><use href="#i-system"/></svg><span>系统</span></button>
+    </nav>
+  
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <div class="topbar-left"><div class="workspace-name">Priestess</div><div class="workspace-divider"></div><div class="mode-crumb">Priestess / <b data-mode-label>工作台</b></div></div>
+      <button class="command" type="button" id="refresh-all"><svg class="icon"><use href="#i-refresh"/></svg><span>刷新状态</span><kbd>R</kbd></button>
+      <div class="topbar-right"><span class="status-chip"><span class="dot" id="conn-dot"></span><span class="status-text" id="conn-text">未连接</span></span><button class="icon-button" type="button" id="refresh-icon" aria-label="刷新"><svg class="icon"><use href="#i-refresh"/></svg></button><button class="btn btn-sm btn-ghost" type="button" id="topbar-logout">退出</button></div>
+    </header>
+    <main class="content" id="content">
+      <p id="global-error" class="app-error" role="alert" hidden></p>
+      <section class="screen" id="screen-workbench" data-screen-panel="workbench"></section>
+      <section class="screen" id="screen-agents" data-screen-panel="agents" hidden></section>
+      <section class="screen" id="screen-im" data-screen-panel="im" hidden></section>
+      <section class="screen" id="screen-capabilities" data-screen-panel="capabilities" hidden></section>
+      <section class="screen" id="screen-resources" data-screen-panel="resources" hidden></section>
+      <section class="screen" id="screen-system" data-screen-panel="system" hidden></section>
+    </main>
+  </div>
+</div>
+<div class="login-overlay" id="login">
+  <form class="login-card" id="login-form">
+    <div class="eyebrow">PRIESTESS CONSOLE</div>
+    <h1 class="serif">登录管理服务</h1>
+    <p>使用服务端管理令牌。登录后使用当前已保存配置，不会自动修改配置。</p>
+    <label>管理令牌<input id="token" type="password" autocomplete="off" required placeholder="management token"></label>
+    <p id="login-error" class="app-error" role="alert" hidden></p>
+    <button class="btn btn-primary" id="login-button" type="submit">登录</button>
+    <small>管理令牌保存在 NAS 的 data/management-token。</small>
+  </form>
+</div>
+<div class="run-overlay" id="run-modal" hidden>
+  <div class="run-sheet" role="dialog" aria-modal="true" aria-label="Agent 运行详情">
+    <header class="run-head"><div><div class="eyebrow">AGENT RUN</div><h2 id="run-title">运行详情</h2><p id="run-subtitle"></p></div><button class="icon-button" type="button" id="run-close" aria-label="关闭">×</button></header>
+    <div id="run-body"></div>
+  </div>
+</div>
+<div class="run-overlay" id="conversations-modal" hidden>
+  <div class="run-sheet" role="dialog" aria-modal="true" aria-label="会话管理">
+    <header class="run-head"><div><div class="eyebrow">CONVERSATIONS</div><h2>会话</h2><p>搜索、查看、归档或删除控制台与 IM 会话。</p></div><button class="icon-button" type="button" id="conversations-close" aria-label="关闭">×</button></header>
+    <div id="conversations-body"></div>
+  </div>
+</div>
+<div class="run-overlay" id="capability-modal" hidden>
+  <div class="run-sheet" role="dialog" aria-modal="true" aria-label="平台能力配置">
+    <header class="run-head"><div><div class="eyebrow">CAPABILITY CONFIG</div><h2 id="capability-title">平台能力配置</h2><p id="capability-subtitle"></p></div><button class="icon-button" type="button" id="capability-close" aria-label="关闭">×</button></header>
+    <div id="capability-body"></div>
+  </div>
+</div>
+<div class="run-overlay" id="files-modal" hidden>
+  <div class="run-sheet" role="dialog" aria-modal="true" aria-label="工作区文件">
+    <header class="run-head"><div><div class="eyebrow">WORKSPACE FILES</div><h2>文件</h2><p id="files-root">浏览工作区文件</p></div><button class="icon-button" type="button" id="files-close" aria-label="关闭">×</button></header>
+    <div id="files-body"></div>
+  </div>
+</div>
+<div class="run-overlay" id="agent-test-modal" hidden>
+  <div class="run-sheet" role="dialog" aria-modal="true" aria-label="Agent 模型测试">
+    <header class="run-head"><div><div class="eyebrow">AGENT TEST</div><h2>模型测试</h2><p>调用真实模型，产生用量；不执行工具，不发送 IM。</p></div><button class="icon-button" type="button" id="agent-test-close" aria-label="关闭">×</button></header>
+    <div id="agent-test-body"></div>
+  </div>
+</div>
+<div class="run-overlay" id="chat-modal" hidden>
+  <div class="run-sheet" role="dialog" aria-modal="true" aria-label="控制台对话">
+    <header class="run-head"><div><div class="eyebrow">CONSOLE CHAT</div><h2>控制台对话</h2><p>使用真实 Agent；工具与审批按当前配置执行。</p></div><button class="icon-button" type="button" id="chat-close" aria-label="关闭">×</button></header>
+    <div id="chat-body"></div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="vendor/qrcode.js"></script>
+<script type="module" src="app.js"></script>
+</body>
 </html>

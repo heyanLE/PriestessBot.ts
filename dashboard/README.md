@@ -1,61 +1,63 @@
-# PriestessBot Dashboard
+# Priestess Console Dashboard
 
-PriestessBot 的 Vue 管理界面。当前页面只连接根目录 Node.js 服务的 `/api/ts` 接口。Kotlin 与 Rust 的旧页面已归档，不再进入活跃前端构建。
+新 Dashboard 前端。旧 Vue Dashboard 已归档到 `../archive/dashboard-vue-20261117/`。
 
-## 本机运行
+## 结构
 
-需要 Node.js 22.18 或更新版本。先在仓库根目录安装依赖并启动服务：
+- `index.html`：六 Tab shell、登录层、图标 sprite
+- `styles.css`：新设计样式
+- `app.js`：真实 API 客户端与六个页面渲染
+- `build.mjs`：把源文件复制到 `dist/`
 
-```sh
-npm ci
-npm --prefix dashboard ci
-npm run dev
+## 构建
+
+```bash
+npm --prefix dashboard run build
 ```
 
-在另一个终端、同一仓库根目录启动 Dashboard：
+生产服务读取 `dashboard/dist`。没有独立依赖，不需要 `npm install`。
 
-```sh
-npm run dev:dashboard
-```
+## 已接真实 API
 
-Vite 默认使用 `5173` 端口，将 `/api/ts`、`/api`、`/health` 和 `/ws` 转发到 `127.0.0.1:8081`。设置 `VITE_TS_PORT` 可以更改后端端口；此变量继续兼容已有启动命令。管理登录使用服务端令牌和 HttpOnly 会话 Cookie，活跃界面不将令牌写入浏览器本地存储。
+- 登录 / 登出：`/api/ts/auth/*`
+- 配置与 revision：`/api/ts/config`
+- IM 状态：`/api/ts/platforms`
+- Agent 运行记录：`/api/ts/agent-records`
+- 能力目录：`/api/ts/agent-capabilities`
+- 工作区三区：`/api/ts/workspace`
+- 环境：`/api/ts/environments`
+- 人格列表：`/api/ts/personas`
 
-## 页面与操作
+## 已支持的操作
 
-主入口为工作台、Agent、机器人、资源库、设置。Agent 和人格绑定可以一起发布，其他对象的未完成草稿保留。人格库只编辑人格；分配人格在 Agent 中完成。发送者授权支持多个 ID 共用一个固定运行态。
+- 登录管理服务
+- 查看六个 Tab
+- 工作区文件浏览器：目录浏览、上传、下载、预览、新建文件夹、移动、删除
+- 控制台对话：新建会话、发送消息、轮询回复
+- Flow 模拟：按平台/会话/发送者模拟路由结果
+- 保存 Agent 的显示名称、模型、连接、系统提示词、启用状态、工具开关、资源绑定、人格绑定、上下文压缩、委派、记忆提取和运行限制
+- Agent 示例对话、技能 allowlist、语音提示、自定义错误回复
+- Agent 模型测试：真实模型调用，不执行工具/不发送 IM
+- 新建/删除 Agent
+- IM 新增、编辑、删除和启停；Telegram / NapCat / 微信字段；消息路由规则、发送者授权、微信扫码登录
+- 运行记录详情、停止运行、工具审批、进程列表/终止（活动运行）、导出运行记录和产物下载
+- 资源页四个子页：Skill / MCP、人格、知识库、长期记忆
+- 平台能力配置：所有插件入口；QQ 群文件/Markdown/Bangumi/本地回忆/回答剧本专用表单；B 站扫码登录链接/本地二维码和轮询、B 站/Bangumi 订阅
+- 人格新建、编辑和删除
+- 知识库/记忆库新建与删除
+- 会话管理：搜索、查看消息、归档/取消归档、删除、导出
+- 配置版本：恢复历史修订、导入配置 JSON
+- 模型服务新增/编辑/删除；服务端密钥管理；管理审计
+- 网络搜索设置；原生扩展列表/启停
+- 知识库文档列表、导入、重建索引、删除和检索
+- 长期记忆列表、新增、编辑和删除
+- 导出当前配置
+- 退出登录
 
-会话页按时间平铺全部平台记录，默认包含归档记录。可按平台实例、群聊或私聊、会话 ID、Agent 和关键词筛选。控制台对话 `/chat` 只显示控制台历史；平台会话在 `/sessions` 查看。
+## 说明
 
-记录分为 `/route-records` 路由记录和 `/agent-records` Agent 记录。前者解释接入、忽略、指令与分派结果；后者显示模型与工具调用、用量、审批和产物。两页可互相跳转，并导出有长度上限且已脱敏的审计 JSON。旧 `/runs` 书签保留跳转。旧数据缺少指标时显示“未知”，不会补成零。
-
-右侧草稿测试调用模型，但不执行工具或发送 IM。命令工具的实际范围由固定运行态、工具装配和执行环境共同决定。普通与资深干员使用受限命令；高级资深干员才可使用完整 Shell。
-
-## 检查
-
-在仓库根目录运行：
-
-```sh
-npm run build:dashboard
-npm run test:dashboard
-```
-
-前端构建执行严格 TypeScript 检查和 Vue 类型检查。流程测试使用根目录的 `packages/contracts` 与 `node_modules/tsx`，不连接真实机器人。
-
-两份浏览器测试脚本保留为独立入口，须显式准备 Playwright 与兼容浏览器：
-
-```sh
-npm --prefix dashboard run test:typescript
-npm --prefix dashboard run test:typescript-live
-```
-
-- `test:typescript` 使用内存 API 夹具，不访问真实模型或 IM。
-- `test:typescript-live` 只用于专用临时服务。设置 `TS_TEST_TOKEN`，并按需设置 `TS_TEST_BASE`；默认地址为 `http://127.0.0.1:8081`。测试会创建临时资源并发布配置，不能指向生产 NAS。
-- `PLAYWRIGHT_MODULE` 可指定已有 Playwright 模块路径，`TEST_BROWSER_EXECUTABLE` 可指定浏览器程序。
-
-测试截图写入 `dashboard/.build/ts-ui/`。运行浏览器测试仍需遵守当前会话的浏览器授权与安全限制。
-
-## 旧界面归档
-
-完整历史 Dashboard 快照保存在 [`archive/kotlin/dashboard`](../archive/kotlin/dashboard/)。移出活跃目录的文件清单见 [`archive-removal-manifest.json`](archive-removal-manifest.json)；移除前已逐文件校验 SHA-256。
-
-旧 `/legacy/...` 书签跳转到对应的当前页面，`/rust` 跳转到消息路由。它们不会加载归档代码或访问旧服务。当前视觉与操作约定见 [`DESIGN.md`](DESIGN.md)。
+- 配置保存会创建新 revision；`workspace` 字段由新前端原样提交。
+- 已提供 QQ 群文件、Markdown、Bangumi、本地回忆、回答剧本的专用设置表单；不需要拖拽式 Flow。
+- 仍未解决：B 站上游扫码登录返回 400。
+- 旧生产静态文件备份在 release 的 `dashboard.pre-new-20261117/`。
+- 左上角使用 `dashboard/assets/priestess-icon.jpg`。

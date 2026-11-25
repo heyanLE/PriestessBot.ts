@@ -1,5 +1,21 @@
 # Shared group conversations and quoted media
 
+## Automatic context limit (2026-11-14)
+
+Each new group run automatically receives at most five earlier messages in total,
+selected by timestamp across confirmed public dialogue and untriggered chatter.
+User and bot messages each consume one slot. The current request and its explicit
+quote are additional inputs. Same-run follow-ups retain their active task context
+without appending another batch of automatic history. The larger persisted public
+archive and searchable history remain available for explicitly requested recall.
+
+Deployed as `20261114-history-five`, retaining configuration r21. NAS health and
+NapCat connection passed. Backend regression passed 582 checks with four Docker
+checks skipped. The runtime regression verifies that four chatter messages plus
+the most recent bot reply consume exactly five slots while the current request
+and explicit quote remain visible. Backup is stored at
+`/home/heyanhub/apps/priestess/backups/20261114-history-five`.
+
 The group conversation follows AstrBotX's shared public-dialogue behavior. Current sender authorization remains independent of the public history.
 
 - A shared transcript is keyed by platform, group, Agent and reset generation. It contains confirmed public user/assistant turns, including sender attribution and bounded image inputs. Default retention is 200 messages / 32,000 text characters, cut at complete-turn boundaries; up to eight historical images / 8 MiB are retained with explicit omission notices.

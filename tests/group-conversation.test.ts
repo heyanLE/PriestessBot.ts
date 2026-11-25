@@ -48,6 +48,21 @@ void test('generation reset and invalid message ownership cannot publish a publi
     assert.equal(service.captureTurn({ ...cancelled, context: { ...cancelled.context, signal: AbortSignal.abort() } }, 'cancelled'), false);
   } finally { store.close(); }
 });
+void test('public document references survive group follow-ups only within their scope and lifetime', () => {
+  const store = new RuntimeStore(':memory:');
+  try {
+    const service = new GroupConversationService(store); const alice = input(store);
+    const file = { type: 'file' as const, name: 'report.pdf', mimeType: 'application/pdf', url: 'attachment:sha256:test', modelFile: { provider: 'deepseek' as const, connectionId: 'default', fileId: 'file-api-document', expiresAt: Date.now() + 60000 } };
+    service.captureTurn({ ...alice, message: { ...alice.message, parts: [file] } }, 'Read the document');
+    const history = service.snapshot(input(store, 'bob').context);
+    assert.equal(history[0]?.files?.[0]?.fileId, 'file-api-document');
+    assert.deepEqual(service.snapshot(input(store, 'bob', 'other-group').context), []);
+    const expired = input(store, 'carol');
+    service.captureTurn({ ...expired, message: { ...expired.message, parts: [{ ...file, modelFile: { ...file.modelFile, expiresAt: 1 } }] } }, 'Expired');
+    const next = service.snapshot(input(store, 'dave').context);
+    assert.equal(next[2]?.files, undefined); assert.match(next[2]?.text ?? '', /文档已过期/);
+  } finally { store.close(); }
+});
 void test('follow-ups remain complete turns under message and character limits', () => {
   const store = new RuntimeStore(':memory:');
   try {

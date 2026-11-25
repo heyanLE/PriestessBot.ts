@@ -86,6 +86,22 @@ void test('cancelling a parent aborts its child transport and emits no late IM r
   });
 });
 
+void test('cancelling the delegated run aborts only the child and lets the parent finish', async () => {
+  const model = new DelegationModel(1, true);
+  await fixture(model, async (runtime, adapter) => {
+    const parent = runtime.submit(message(), adapter);
+    await model.childStarted;
+    const child = runtime.store.runs().find(run => run.parentRunId === parent.id);
+    assert.ok(child);
+    runtime.cancel(child.id);
+    assert.equal(model.childCancelled, true);
+    await runtime.idle();
+    assert.equal(runtime.detail(child.id).run.status, 'cancelled');
+    assert.deepEqual(runtime.detail(child.id).events.filter(event => ['completed', 'failed', 'cancelled'].includes(event.type)).map(event => event.type), ['cancelled']);
+    assert.equal(runtime.detail(parent.id).run.status, 'completed');
+  });
+});
+
 void test('child deltas remain in child audit and never stream to the parent IM destination', async () => {
   await fixture(new DelegationModel(1), async (runtime, adapter, sent) => {
     const parent = runtime.submit(message(), adapter); await runtime.idle();

@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="dashboard/public/assets/priestess-icon.jpg" alt="PriestessBot Logo" width="160" height="160">
+  <img src="dashboard/assets/priestess-icon.jpg" alt="PriestessBot Logo" width="160" height="160">
 </p>
 
 # PriestessBot
 
-PriestessBot（普瑞赛斯）是基于 **TypeScript、OpenAI Agents SDK 和 Vue 3** 的 Agent 聊天机器人。支持 NapCat（QQ）、Telegram、微信 iLink，提供独立 Agent、人格、会话、记忆、知识库、工具、执行环境和绿色主题 Dashboard。
+PriestessBot（普瑞赛斯）是基于 **TypeScript 和 OpenAI Agents SDK** 的 Agent 聊天机器人。支持 NapCat（QQ）、Telegram、微信 iLink，提供独立 Agent、人格、会话、记忆、知识库、工具、执行环境和紫色新 Dashboard。
 
 ## 快速开始
 
@@ -12,16 +12,14 @@ PriestessBot（普瑞赛斯）是基于 **TypeScript、OpenAI Agents SDK 和 Vue
 
 ```sh
 npm ci
-npm --prefix dashboard ci
 npm run check
-npm run test:dashboard
 npm run build
 PRIESTESS_CONFIG="$PWD/config.example.json" npm start
 ```
 
 打开 <http://127.0.0.1:8081>。首次启动会在 `.runtime/management-token` 生成管理令牌，运行数据保存在 `.runtime/runtime.sqlite`。示例配置中的 IM 默认禁用；在 Dashboard 配好模型、机器人和授权后再启用。
 
-开发时，后端使用 `npm run dev`，前端使用另一个终端运行 `npm run dev:dashboard`。前端开发服务默认连接本机 8081 后端，可用 `VITE_TS_PORT` 调整。
+开发时，后端使用 `npm run dev`。Dashboard 是 `dashboard/` 下的静态前端，修改后运行 `npm run build:dashboard` 并刷新页面。旧 Vue Dashboard 已归档到 `archive/dashboard-vue-20261117/`。
 
 ## 目录
 
@@ -30,13 +28,14 @@ apps/server/          HTTP 服务、平台生命周期与运行装配
 packages/contracts/  强类型 schema 与共享接口
 packages/core/       Agent、授权、路由、会话、存储与记忆
 packages/adapters/   模型 SDK、IM、工具、执行与外部服务
-dashboard/          Vue Dashboard（独立 npm 锁文件）
+dashboard/          新静态 Dashboard（无独立依赖）
 tests/               后端与协议测试
 tools/               迁移、验收和开发工具
 deploy/              systemd 示例与执行环境镜像
 scripts/             NAS 发行包构建
 docs/                当前运行与维护文档
-archive/kotlin/      旧 Kotlin/JNI、旧 Dashboard 与历史文档
+archive/kotlin/      旧 Kotlin/JNI 与历史文档
+archive/dashboard-vue-20261117/  旧 Vue Dashboard 快照
 ```
 
 旧 Kotlin 版本已归档，不参与当前 npm、CI、Docker 或发行包构建。归档保留未提交的代码和本机数据；本机凭据、缓存和依赖不会进入 Git 或镜像。见 [归档说明](archive/kotlin/ARCHIVE.md)。

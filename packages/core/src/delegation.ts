@@ -3,7 +3,7 @@ import { RunIdSchema, type AgentDefinition, type AgentEngine, type EngineResult,
 import type { AuthorizationService} from './authorization.js';
 import { intersectResources } from './authorization.js';
 
-interface SharedBudget { count: number; active: number; tokens: number; reservedTokens: number; limit: number; deadline: number; readonly children: Set<AbortController>; readonly reservations: Map<string, number>; }
+interface SharedBudget { count: number; active: number; tokens: number; reservedTokens: number; limit: number; deadline: number; readonly children: Map<string, AbortController>; readonly reservations: Map<string, number>; }
 export class DelegationService {
   private readonly budgets = new Map<string, SharedBudget>();
   constructor(private readonly auth: AuthorizationService, private readonly getAgent: (id: string) => AgentDefinition | undefined, private readonly getEngine: (id: string) => AgentEngine | undefined) {}
@@ -17,7 +17,7 @@ export class DelegationService {
     if (parent.depth >= parent.budget.maxDelegationDepth) throw new Error('Delegation depth exceeded');
     const root = parent.parentRunId ?? parent.runId;
     let shared = this.budgets.get(root);
-    if (shared === undefined) { shared = { count: 0, active: 0, tokens: 0, reservedTokens: 0, limit: parent.budget.maxTokens, deadline: Date.now() + parent.budget.timeoutMs, children: new Set(), reservations: new Map() }; this.budgets.set(root, shared); }
+    if (shared === undefined) { shared = { count: 0, active: 0, tokens: 0, reservedTokens: 0, limit: parent.budget.maxTokens, deadline: Date.now() + parent.budget.timeoutMs, children: new Map(), reservations: new Map() }; this.budgets.set(root, shared); }
     else if (parent.parentRunId === undefined && parent.budget.tokenLimitMode === 'cumulative') shared.limit = Math.min(shared.limit, parent.budget.maxTokens + shared.tokens);
     const parentReservation = shared.reservations.get(parent.runId);
     const cumulativeParent = parent.budget.tokenLimitMode === 'cumulative';
@@ -40,7 +40,7 @@ export class DelegationService {
       else shared.reservations.set(parent.runId, parentReservation - reservedTokens);
       shared.reservations.set(context.runId, reservedTokens);
     }
-    shared.children.add(controller);
+    shared.children.set(context.runId, controller);
     let consumedTokens = 0; let reportedTokens = 0; let reportedOwnTokens = 0;
     const childEmit = (event: RunEvent): void => {
       if (event.type === 'usage' && event.runId === context.runId) { reportedTokens += event.inputTokens + event.outputTokens; if (event.source !== 'delegation') reportedOwnTokens += event.inputTokens + event.outputTokens; }
@@ -67,8 +67,14 @@ export class DelegationService {
         if (parentRemaining === undefined) shared.reservedTokens -= remaining;
         else { const unused = Math.max(0, remaining - ownTokens); shared.reservations.set(parent.runId, parentRemaining + unused); shared.reservedTokens -= remaining - unused; }
       }
-      shared.reservations.delete(context.runId); shared.children.delete(controller);
+      shared.reservations.delete(context.runId); shared.children.delete(context.runId);
     }
   }
-  release(parentRunId: string): void { const budget = this.budgets.get(parentRunId); if (budget === undefined) return; for (const controller of budget.children) controller.abort(new Error('Parent run finished')); this.budgets.delete(parentRunId); }
+  cancelRun(runId: string, reason: string): void {
+    for (const budget of this.budgets.values()) {
+      const child = budget.children.get(runId);
+      if (child) { child.abort(new Error(reason)); return; }
+    }
+  }
+  release(parentRunId: string): void { const budget = this.budgets.get(parentRunId); if (budget === undefined) return; for (const controller of budget.children.values()) controller.abort(new Error('Parent run finished')); this.budgets.delete(parentRunId); }
 }

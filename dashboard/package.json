@@ -1,32 +1,10 @@
 {
-  "name": "priestessbot-dashboard",
+  "name": "priestess-dashboard",
+  "version": "0.2.0",
   "private": true,
-  "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
-    "build": "npm run check:typescript-strict && vue-tsc --noEmit && vite build",
-    "preview": "vite preview --host 0.0.0.0",
-    "test:typescript": "node --import ../node_modules/tsx/dist/loader.mjs scripts/ts-browser-smoke-test.mjs",
-    "test:typescript-live": "node --import ../node_modules/tsx/dist/loader.mjs scripts/ts-live-smoke-test.mjs",
-    "check:typescript-strict": "tsc -p tsconfig.tools.json && node scripts/ts-strict-check.ts",
-    "test:workflows": "tsc -p tsconfig.workflow-tests.json && node --import ../node_modules/tsx/dist/loader.mjs --test scripts/workflow-*.test.ts"
-  },
-  "dependencies": {
-    "@phosphor-icons/vue": "^2.2.1",
-    "@vitejs/plugin-vue": "^5.2.4",
-    "pinia": "^2.3.1",
-    "qrcode": "1.5.4",
-    "typescript": "^5.8.3",
-    "vite": "^6.3.5",
-    "vue": "^3.5.13",
-    "vue-router": "^4.5.1",
-    "vue-tsc": "^2.2.10"
-  },
-  "devDependencies": {
-    "@types/qrcode": "1.5.5"
-  },
-  "engines": {
-    "node": ">=22.18.0"
+    "build": "node build.mjs",
+    "test": "node --import tsx --test tests/*.test.mjs"
   }
 }

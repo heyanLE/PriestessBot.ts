@@ -7,7 +7,7 @@ import type { RuntimeStore } from '../../../core/src/storage.js';
 import { AgentsContextSummarizer } from './context-summary.js';
 import { SqliteAgentSession, estimateContextTokens } from './session.js';
 import { principalKey } from '../../../core/src/authorization.js';
-import { activeInputIndex, assembleRootInstructions, synchronizePersonaAnchors } from './prompt-context.js';
+import { activeInputIndex, assembleRootInstructions, synchronizePersonaAnchors, normalizeLeadingAssistantHistory } from './prompt-context.js';
 import { cachedInputTokens } from './usage.js';
 import { DynamicContextModel, type DynamicContextSnapshot } from './dynamic-context.js';
 import type { PublicGroupMessage } from '../../../contracts/src/group-conversation.js';
@@ -17,8 +17,10 @@ import { AuditedModel } from './model-audit.js';
 import { capturedOpenAIProvider, type RawModelCaptureSink } from './raw-model-capture.js';
 import { auditedTools } from './tool-audit.js';
 import { safeAuditError } from './audit.js';
+import { customModelSettings, customModelTools } from './model-parameters.js';
 
-export interface SdkLocalContext { readonly runId: string; }
+const SearchBudgetSchema = z.object({ remainingTokens: z.number().int().nonnegative(), previewOnly: z.boolean() });
+export interface SdkLocalContext { readonly runId: string; searchBudget?: z.infer<typeof SearchBudgetSchema>; }
 export interface AgentsEngineDependencies {
   readonly store: RuntimeStore;
   readonly config: () => RuntimeConfig;
@@ -27,6 +29,8 @@ export interface AgentsEngineDependencies {
   readonly assertCurrent: (input: EngineInput) => void;
   readonly tools: (input: EngineInput, emit: (event: RunEvent) => void) => Promise<Tool<SdkLocalContext>[]>;
   readonly model?: Model;
+  readonly providerTools?: boolean;
+  readonly assertModelFiles?: (input: EngineInput, modelInput: unknown) => void;
   readonly followUps?: (input: EngineInput, close?: boolean) => Promise<readonly EngineInput[]>;
   readonly dynamicContext?: (input: EngineInput) => Promise<DynamicContextSnapshot>;
   readonly groupHistory?: (input: EngineInput) => readonly PublicGroupMessage[] | undefined;
@@ -34,7 +38,10 @@ export interface AgentsEngineDependencies {
   readonly cleanup?: (input: EngineInput) => Promise<void>;
   readonly captureModel?: (input: EngineInput) => RawModelCaptureSink;
 }
-const PauseSchema = z.object({ engine: z.literal('agents_sdk'), version: z.string(), principal: z.string(), agentId: z.string(), generation: z.number(), revision: z.number(), usedTokens: z.number().default(0), usedTurns: z.number().default(0), usedModelCalls: z.number().default(0), observedModelCalls: z.number().int().nonnegative().default(0), lastMainModelCall: z.number().int().nonnegative().default(0), usedInputTokens: z.number().default(0), usedOutputTokens: z.number().default(0), taskTexts: z.array(z.string()).default([]), toolFacts: z.array(z.string()).default([]), lastInputTokens: z.number().default(0), lastEstimatedTokens: z.number().default(0), state: z.string() });
+const PauseSchema = z.object({ engine: z.literal('agents_sdk'), version: z.string(), principal: z.string(), agentId: z.string(), generation: z.number(), revision: z.number(), usedTokens: z.number().default(0), usedTurns: z.number().default(0), usedModelCalls: z.number().default(0), observedModelCalls: z.number().int().nonnegative().default(0), lastMainModelCall: z.number().int().nonnegative().default(0), usedInputTokens: z.number().default(0), usedOutputTokens: z.number().default(0), taskTexts: z.array(z.string()).default([]), toolFacts: z.array(z.string()).default([]), lastInputTokens: z.number().default(0), lastEstimatedTokens: z.number().default(0), state: z.string(),
+  // Older pauses have no reliable count of the search content already in their history.
+  searchBudget: SearchBudgetSchema.nullable().default({ remainingTokens: 0, previewOnly: true }),
+});
 class FinalizationRequested extends Error {
   constructor(readonly reason: 'tokens' | 'turns') { super(`Run ${reason} budget reached; produce a tool-free final answer`); }
 }
@@ -47,12 +54,42 @@ export class AgentsSdkEngine implements AgentEngine {
   constructor(private readonly dependencies: AgentsEngineDependencies) {}
   async run(input: EngineInput, emit: (event: RunEvent) => void): Promise<EngineResult> { return this.observedExecution(input,emit); }
   async resume(input: EngineInput, approvalId: string, approved: boolean, emit: (event: RunEvent) => void): Promise<EngineResult> { return this.observedExecution(input,emit,{id:approvalId,approved}); }
-  private async observedExecution(input:EngineInput,emit:(event:RunEvent)=>void,approval?:{id:string;approved:boolean}):Promise<EngineResult>{
-    let started=false;let terminal=false;let sequence=0;
-    const forward=(event:RunEvent):void=>{if(event.runId===input.context.runId){sequence=Math.max(sequence,event.sequence+1);if(event.type==='started')started=true;if(['completed','failed','cancelled','paused'].includes(event.type))terminal=true;}emit(event);};
-    try{return await this.execute(input,forward,approval);}
-    catch(error){if(started&&!terminal){const base={runId:input.context.runId,turnId:input.context.turnId,sequence,timestamp:Date.now()};forward(input.context.signal.aborted?{...base,type:'cancelled',reason:'Run cancelled'}:{...base,type:'failed',error:{code:'internal',message:safeAuditError(error),retryable:false}});}throw error;}
-    finally{await this.dependencies.cleanup?.(input);}
+  private async observedExecution(input: EngineInput, emit: (event: RunEvent) => void, approval?: { id: string; approved: boolean }): Promise<EngineResult> {
+    let started = false;
+    let terminal = false;
+    let sequence = 0;
+    let pause: Extract<RunEvent, { type: 'paused' }> | undefined;
+    const forward = (event: RunEvent): void => {
+      if (event.runId === input.context.runId) {
+        sequence = Math.max(sequence, event.sequence + 1);
+        if (event.type === 'started') started = true;
+        // Cleanup can still be cancelled before the host receives the resumable state.
+        if (event.type === 'paused') { pause = event; return; }
+        if (['completed', 'failed', 'cancelled'].includes(event.type)) terminal = true;
+      }
+      emit(event);
+    };
+    let result: EngineResult;
+    try {
+      try { result = await this.execute(input, forward, approval); }
+      finally { await this.dependencies.cleanup?.(input); }
+    } catch (error) {
+      if (pause) this.dependencies.store.delete('sdk-pauses', pause.approvalId);
+      if (started && !terminal) {
+        const base = { runId: input.context.runId, turnId: input.context.turnId, sequence, timestamp: Date.now() };
+        emit(input.context.signal.aborted ? { ...base, type: 'cancelled', reason: 'Run cancelled' } : { ...base, type: 'failed', error: { code: 'internal', message: safeAuditError(error), retryable: false } });
+      }
+      throw error;
+    }
+    if (pause) {
+      if (input.context.signal.aborted) {
+        this.dependencies.store.delete('sdk-pauses', pause.approvalId);
+        emit({ type: 'cancelled', runId: pause.runId, turnId: pause.turnId, sequence: pause.sequence, timestamp: Date.now(), reason: 'Run cancelled' });
+        return { status: 'cancelled', text: '', inputTokens: result.inputTokens, outputTokens: result.outputTokens };
+      }
+      emit(pause);
+    }
+    return result;
   }
   private async execute(input: EngineInput, emit: (event: RunEvent) => void, approval?: { id: string; approved: boolean }): Promise<EngineResult> {
     const deps = this.dependencies;
@@ -64,7 +101,7 @@ export class AgentsSdkEngine implements AgentEngine {
     send({type:'started',agentId:input.agent.id});
     if(approval===undefined){
       const groupHistory=deps.groupHistory?.(input);
-      if(groupHistory!==undefined){const items:AgentInputItem[]=groupHistory.map(item=>item.role==='assistant'?{type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:item.text}]}:{role:'user',content:[{type:'input_text',text:item.text},...(item.images??[]).map((image):protocol.UserContent=>({type:'input_image',image:image.url}))]});deps.store.put('sdk-history',input.session.id,protocol.ModelItem.array().parse(items));}
+      if(groupHistory!==undefined){const items:AgentInputItem[]=groupHistory.map(item=>item.role==='assistant'?{type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:item.text}]}:{role:'user',content:[{type:'input_text',text:item.text},...(item.images??[]).map((image):protocol.UserContent=>({type:'input_image',image:image.url})),...(item.files??[]).filter(file=>file.connectionId===input.agent.connectionId && file.expiresAt>Date.now()).map((file):protocol.UserContent=>({type:'input_file',file:{id:file.fileId}}))]});deps.store.put('sdk-history',input.session.id,protocol.ModelItem.array().parse(items));}
       else deps.historySeed?.(input, items => deps.store.put('sdk-history', input.session.id, protocol.ModelItem.array().parse(items.map(item => item.role === 'user' ? { role:'user',content:[{type:'input_text',text:item.text}] } : {type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:item.text}]}))));
     }
     const legacyToolStatus = new Map<string,'started'|'completed'|'failed'>();
@@ -119,13 +156,13 @@ export class AgentsSdkEngine implements AgentEngine {
       preparedDynamicContext = snapshot ?? { scope: input.session.id, components: [] };
       return snapshot;
     };
-    const dynamicModel = new DynamicContextModel(new AuditedModel(selectedModel,{model:input.agent.model,source:()=>modelSource,nextCall,knownSecrets,emit:send,...(rawCapture ? {rawCapture} : {})}), { scope: input.session.id, maxChars: 16000, insertionIndex: items => activeInputIndex(items, userInputs), assertCurrent: () => deps.assertCurrent(input), snapshot: () => preparedDynamicContext, validateRequest: request => { if (finalInputAllowance !== undefined && estimateContextTokens(request.input) + estimateContextTokens(request.systemInstructions ?? '') > finalInputAllowance) throw new Error('Finalization input exceeds remaining cumulative budget'); const external = Math.max(0, estimateContextTokens(request.input) - estimateContextTokens(preparedHistory)) + estimateContextTokens(request.systemInstructions ?? '') + estimateContextTokens(JSON.stringify(request.tools)); session.assertWithinWindow(preparedHistory, external + modelOutputAllowance); }, observeUsage: (request, inputTokens) => { const external = Math.max(0, estimateContextTokens(request.input) - estimateContextTokens(preparedHistory)) + estimateContextTokens(request.systemInstructions ?? '') + estimateContextTokens(JSON.stringify(request.tools)); session.observeUsage(preparedHistory, {inputTokens}, external); } });
+    const dynamicModel = new DynamicContextModel(new AuditedModel(selectedModel,{model:input.agent.model,source:()=>modelSource,nextCall,knownSecrets,emit:send,...(rawCapture ? {rawCapture} : {})}), { scope: input.session.id, maxChars: 16000, insertionIndex: items => activeInputIndex(items, userInputs), assertCurrent: () => deps.assertCurrent(input), snapshot: () => preparedDynamicContext, validateRequest: request => { deps.assertModelFiles?.(input, request.input); if (finalInputAllowance !== undefined && estimateContextTokens(request.input) + estimateContextTokens(request.systemInstructions ?? '') > finalInputAllowance) throw new Error('Finalization input exceeds remaining cumulative budget'); const external = Math.max(0, estimateContextTokens(request.input) - estimateContextTokens(preparedHistory)) + estimateContextTokens(request.systemInstructions ?? '') + estimateContextTokens(JSON.stringify(request.tools)); session.assertWithinWindow(preparedHistory, external + modelOutputAllowance); }, observeUsage: (request, inputTokens) => { const external = Math.max(0, estimateContextTokens(request.input) - estimateContextTokens(preparedHistory)) + estimateContextTokens(request.systemInstructions ?? '') + estimateContextTokens(JSON.stringify(request.tools)); session.observeUsage(preparedHistory, {inputTokens}, external); } });
     const instructions = assembleRootInstructions(input.agent.instructions);
     const agent = new Agent<SdkLocalContext>({
       name: input.agent.id, instructions,
       model: new BudgetedModel(dynamicModel, input.context.budget.maxTokens, usedTokens, { mode: input.context.budget.tokenLimitMode, reserveTokens: () => nextCallReserve, onUsage: usage => accountUsage(usage, 'model') }),
-      tools,
-      modelSettings: { maxTokens: Math.min(input.context.budget.maxTokens, Math.floor(input.agent.contextPolicy.contextWindowTokens / 4)) },
+      tools: [...tools, ...(deps.providerTools === false ? [] : customModelTools(config.connections.find(item => item.id === input.agent.connectionId)))],
+      modelSettings: { ...customModelSettings(config.connections.find(item => item.id === input.agent.connectionId)), maxTokens: Math.min(input.context.budget.maxTokens, Math.floor(input.agent.contextPolicy.contextWindowTokens / 4)) },
     });
     const runner = new Runner({ ...(provider === undefined ? {} : { modelProvider: provider }), tracingDisabled: true, traceIncludeSensitiveData: false });
     let sdkInput: AgentInputItem[] | RunState<SdkLocalContext, typeof agent>;
@@ -135,6 +172,7 @@ export class AgentsSdkEngine implements AgentEngine {
       // An explicit SDK context override does not restore serialized usage. Seed it
       // once so child cost added during resume is compared against the same ledger.
       localContext.usage.add(new Usage({ inputTokens: saved.usedInputTokens, outputTokens: saved.usedOutputTokens, totalTokens: saved.usedTokens }));
+      if (saved.searchBudget) localContext.context.searchBudget = saved.searchBudget;
       sdkInput = await RunState.fromStringWithContext(agent, saved.state, localContext);
       resumedTurns = saved.usedTurns; usedInputTokens = saved.usedInputTokens; usedOutputTokens = saved.usedOutputTokens; usageCalls = saved.usedModelCalls || saved.usedTurns; observedModelCalls=Math.max(saved.observedModelCalls,usageCalls);lastMainModelCall=saved.lastMainModelCall||observedModelCalls;
       if (saved.taskTexts.length) taskTexts.splice(0, taskTexts.length, ...saved.taskTexts);
@@ -158,7 +196,7 @@ export class AgentsSdkEngine implements AgentEngine {
           const reserved = estimateContextTokens(modelData.instructions ?? '') + estimateContextTokens(JSON.stringify(tools)) + dynamicTokens + Math.min(input.context.budget.maxTokens, Math.floor(input.agent.contextPolicy.contextWindowTokens / 4));
           const anchored = synchronizePersonaAnchors(combined, input.agent, activeInputIndex(combined, currentInputs));
           preparedHistory = await session.processInput(anchored, reserved, {hardLimitOnly});
-          preparedHistory = synchronizePersonaAnchors(preparedHistory, input.agent, activeInputIndex(preparedHistory, currentInputs));
+          preparedHistory = normalizeLeadingAssistantHistory(synchronizePersonaAnchors(preparedHistory, input.agent, activeInputIndex(preparedHistory, currentInputs)));
           session.setInFlight(true);
           currentEstimatedTokens = estimateContextTokens(preparedHistory) + reserved - Math.min(input.context.budget.maxTokens, Math.floor(input.agent.contextPolicy.contextWindowTokens / 4));
           if (input.context.budget.tokenLimitMode === 'cumulative' && input.context.budget.maxTokens >= 1024) {
@@ -187,7 +225,7 @@ export class AgentsSdkEngine implements AgentEngine {
         const usage = { totalTokens: usedTokens(), inputTokens: usedInputTokens, outputTokens: usedOutputTokens };
         if (result.interruptions.length > 0) {
           const approvalId = randomUUID();
-          deps.store.put('sdk-pauses', approvalId, { engine: this.id, version: this.version, principal: principalKey(input.context.principal), agentId: input.agent.id, generation: input.context.generation, revision: input.context.configRevision, usedTokens: usage.totalTokens, usedTurns: modelCalls, usedModelCalls: usageCalls, observedModelCalls, lastMainModelCall, usedInputTokens: usage.inputTokens, usedOutputTokens: usage.outputTokens, taskTexts, toolFacts, lastInputTokens: previousInputTokens, lastEstimatedTokens: previousEstimatedTokens, state: result.state.toString() });
+          deps.store.put('sdk-pauses', approvalId, { engine: this.id, version: this.version, principal: principalKey(input.context.principal), agentId: input.agent.id, generation: input.context.generation, revision: input.context.configRevision, usedTokens: usage.totalTokens, usedTurns: modelCalls, usedModelCalls: usageCalls, observedModelCalls, lastMainModelCall, usedInputTokens: usage.inputTokens, usedOutputTokens: usage.outputTokens, taskTexts, toolFacts, lastInputTokens: previousInputTokens, lastEstimatedTokens: previousEstimatedTokens, searchBudget: localContext.context.searchBudget ?? null, state: result.state.toString() });
           send({ type: 'paused', approvalId, tools: result.interruptions.map(item => item.name ?? 'unknown') });
           return { status: 'paused', text: '', inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, state: approvalId };
         }
@@ -261,12 +299,12 @@ export class AgentsSdkEngine implements AgentEngine {
     const closure: AgentInputItem = { role: 'user', content: notice };
     const anchored = synchronizePersonaAnchors(history, input.agent, activeInputIndex(history, currentInputs));
     let messages = await session.processInput(anchored, estimateContextTokens(instructions) + outputAllowance + dynamicTokens + 256, { hardLimitOnly: true });
-    messages = synchronizePersonaAnchors(messages, input.agent, activeInputIndex(messages, currentInputs));
+    messages = normalizeLeadingAssistantHistory(synchronizePersonaAnchors(messages, input.agent, activeInputIndex(messages, currentInputs)));
     // Never replace the active task, images or tool chain with text-only excerpts.
     // An optional cumulative cap may prevent a faithful final request altogether.
     if (input.context.budget.tokenLimitMode === 'cumulative' && estimateContextTokens(messages) + estimateContextTokens(instructions) + outputAllowance + dynamicTokens + 256 > remaining) return undefined;
     prepared(messages);
-    const agent = new Agent({ name: input.agent.id, instructions, tools: [], model: new BudgetedModel(model, input.context.budget.maxTokens, usedTokens, { mode: input.context.budget.tokenLimitMode, onUsage: accountUsage }), modelSettings: { maxTokens: outputAllowance, toolChoice: 'none' } });
+    const agent = new Agent({ name: input.agent.id, instructions, tools: [], model: new BudgetedModel(model, input.context.budget.maxTokens, usedTokens, { mode: input.context.budget.tokenLimitMode, onUsage: accountUsage }), modelSettings: { ...customModelSettings(this.dependencies.config().connections.find(item => item.id === input.agent.connectionId)), maxTokens: outputAllowance, toolChoice: 'none' } });
     const result = await runner.run(agent, [...messages, closure], { stream: true, maxTurns: 1, signal: input.context.signal });
     for await (const event of result) { if (event.type === 'run_item_stream_event' && event.name === 'tool_approval_requested') throw new Error('Finalization cannot request tool approval'); this.dependencies.assertCurrent(input); input.context.signal.throwIfAborted(); }
     await result.completed; this.dependencies.assertCurrent(input); input.context.signal.throwIfAborted();
@@ -293,6 +331,11 @@ function modelInput(input: EngineInput): AgentInputItem[] {
       content.push({ type: 'input_image', image: part.url });
     }
     if (part.type === 'file') {
+      if (part.modelFile) {
+        if (part.modelFile.connectionId !== input.agent.connectionId || part.modelFile.expiresAt <= Date.now()) throw new Error('文档引用已过期或模型连接已改变，请重新发送文件。');
+        content.push({ type: 'input_file', file: { id: part.modelFile.fileId } });
+        continue;
+      }
       if (part.extractedText === undefined) throw new Error('File must be parsed before model execution');
       content.push({ type: 'input_text', text: `<attachment name=${JSON.stringify(part.name)}>\n${part.extractedText}\n</attachment>` });
     }

@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { realpath } from 'node:fs/promises';
+import { lstat, mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { DockerSandboxClient, Manifest } from '@openai/agents/sandbox/local';
@@ -10,7 +10,9 @@ import type { Capability, RunContext } from '../../../contracts/src/index.js';
 import type { Authorize, ExecutionBackend, ExecutionConfig, ProcessSnapshot } from './environment.js';
 import { compileCommandPolicy } from '../../../core/src/command-policy.js';
 import { restrictedRunnerLaunch } from './restricted-runner.js';
+import { directoryVersion } from './directory-version.js';
 import { assertWorkspaceWrite, ISOLATED_WORKSPACE, workspaceDirectory, workspaceEntry, workspaceFailure, WorkspacePathError, workspacePath, type WorkspacePath } from './workspace-zones.js';
+import { assertWorkspaceWrite as assertWorkspaceV2Write, WorkspaceLayoutError, workspaceEntryV2, workspaceToolPath, workspaceZoneSegments, type WorkspaceLocation } from './workspace-layout.js';
 import { cleanTerminalOutput, DEFAULT_MAX_OUTPUT_TOKENS, ProcessOutputLog, truncateOutput } from './output.js';
 
 /** The SDK, including file access, owns all interactions with the container. */
@@ -55,6 +57,7 @@ const createSession: DockerSessionFactory = async (manifest, options) => {
   }
 };
 const WORKSPACE = ISOLATED_WORKSPACE;
+const WORKSPACE_V2 = '/workspace';
 const IDLE_MS = 60_000;
 
 interface Scope {
@@ -114,7 +117,9 @@ export class SdkDockerExecutionService implements ExecutionBackend {
     try {
       if (this.stopped) throw new SdkDockerExecutionError('cancelled', 'Execution service is stopped');
       context.signal.throwIfAborted();
-      if (context.resources.executionEnvironment !== (this.config.id ?? this.config.backend)) throw new Error('Execution environment is not assigned');
+      if (this.config.layout !== 'v2') {
+        if (context.resources.executionEnvironment === 'none' || context.resources.executionEnvironment !== (this.config.id ?? this.config.backend)) throw new Error('Execution environment is not assigned');
+      }
       this.authorize(context, capability);
     } catch (error) {
       const scope = this.scopes.get(this.key(context));
@@ -126,6 +131,39 @@ export class SdkDockerExecutionService implements ExecutionBackend {
     this.cleanup.add(promise);
     void promise.then(() => this.cleanup.delete(promise), () => { /* drain reports cleanup errors. */ });
   }
+  private async v2Manifest(context: RunContext, capability: Capability): Promise<Manifest> {
+    try {
+      const elite = context.runtimeState === 'elite_operator';
+      const entries: Record<string, { type: 'mount'; source: string; mountStrategy: { type: 'local_bind' }; readOnly: boolean }> = {};
+      const mount = async (segments: string[], writable: boolean): Promise<void> => {
+        const source = path.join(this.config.root, ...segments);
+        await mkdir(source, { recursive: true, mode: 0o700 });
+        entries[segments.join('/')] = { type: 'mount', source, mountStrategy: { type: 'local_bind' }, readOnly: !writable };
+      };
+      const global = workspaceZoneSegments(context, 'global');
+      const agent = workspaceZoneSegments(context, 'agent');
+      const conversation = workspaceZoneSegments(context, 'conversation');
+      await mount(global, elite);
+      if (elite) await mount(agent, true);
+      else {
+        // Mount the parent read-only so nested targets exist in the container; cache is overlaid read-write.
+        await mount(agent, false);
+        for (const area of ['skill', 'mcp', 'file'] as const) await mount([...agent, area], false);
+        await mount([...agent, 'cache'], true);
+      }
+      if (elite) await mount(conversation, true);
+      else {
+        await mount(conversation, false);
+        for (const area of ['skill', 'file'] as const) await mount([...conversation, area], false);
+        await mount([...conversation, 'cache'], true);
+      }
+      this.check(context, capability);
+      return new Manifest({ root: WORKSPACE_V2, entries, environment: { HOME: WORKSPACE_V2, LANG: 'C.UTF-8' } });
+    } catch (error) {
+      if (error instanceof WorkspaceLayoutError) throw new WorkspacePathError(error.code === 'forbidden' ? 'forbidden' : 'invalid_path', error.message);
+      throw error;
+    }
+  }
   private scope(context: RunContext, capability: Capability): Scope {
     this.check(context, capability);
     const key = this.key(context);
@@ -136,10 +174,13 @@ export class SdkDockerExecutionService implements ExecutionBackend {
     }
     if (this.scopes.size >= (this.config.maxProcesses ?? 8) * 2) throw new SdkDockerExecutionError('capacity', 'Docker session capacity exceeded');
     const sharedWritable = context.runtimeState === 'elite_operator' && context.effectiveCapabilities.includes('resources.manage');
-    const session = Promise.all([workspaceDirectory(this.config.root, context, 'isolated'), workspaceDirectory(this.config.root, context, 'shared')]).then(([directory, shared]) => {
+    const session = (this.config.layout === 'v2' ? this.v2Manifest(context, capability) : Promise.all([workspaceDirectory(this.config.root, context, 'isolated'), workspaceDirectory(this.config.root, context, 'shared')]).then(([directory, shared]) => {
       this.check(context, capability);
       if (sharedWritable) this.check(context, 'resources.manage');
-      return this.factory(new Manifest({ root: '/workspace', entries: { files: { type: 'mount', source: directory, mountStrategy: { type: 'local_bind' }, readOnly: false }, shared: { type: 'mount', source: shared, mountStrategy: { type: 'local_bind' }, readOnly: !sharedWritable } }, environment: { HOME: WORKSPACE, LANG: 'C.UTF-8' } }), {
+      return new Manifest({ root: '/workspace', entries: { files: { type: 'mount', source: directory, mountStrategy: { type: 'local_bind' }, readOnly: false }, shared: { type: 'mount', source: shared, mountStrategy: { type: 'local_bind' }, readOnly: !sharedWritable } }, environment: { HOME: WORKSPACE, LANG: 'C.UTF-8' } });
+    })).then(manifest => {
+      this.check(context, capability);
+      return this.factory(manifest, {
         image: this.config.dockerImage ?? 'node:22-bookworm-slim',
         ...(this.config.networkEnabled === true ? {} : { networkMode: 'none' }),
         labels: { 'priestess.execution': 'sdk-docker', 'priestess.owner': createHash('sha256').update(key).digest('hex') },
@@ -193,20 +234,78 @@ export class SdkDockerExecutionService implements ExecutionBackend {
     assertWorkspaceWrite(context, target);
     if (target.zone === 'shared') this.check(context, 'resources.manage');
   }
+  private async v2Target(context: RunContext, name: string, create = false): Promise<{ location: WorkspaceLocation; host: string; container: string }> {
+    try {
+      const location = workspaceToolPath(context, name);
+      const host = await workspaceEntryV2(this.config.root, location, create);
+      return { location, host, container: `${WORKSPACE_V2}/${location.relativePath}` };
+    } catch (error) {
+      if (error instanceof WorkspaceLayoutError) throw new WorkspacePathError(error.code === 'forbidden' ? 'forbidden' : 'invalid_path', error.message);
+      throw error;
+    }
+  }
+  private checkV2Write(context: RunContext, location: WorkspaceLocation): void {
+    this.check(context, 'files.write');
+    try { assertWorkspaceV2Write(context, location.zone, location.area); } catch (error) {
+      if (error instanceof WorkspaceLayoutError) throw new WorkspacePathError(error.code === 'forbidden' ? 'forbidden' : 'invalid_path', error.message);
+      throw error;
+    }
+    if (location.area === 'skill' || location.area === 'mcp') this.check(context, 'resources.manage');
+  }
   async read(context: RunContext, name: string): Promise<string> {
+    if (this.config.layout === 'v2') {
+      const { container } = await this.v2Target(context, name);
+      return this.use(this.scope(context, 'files.read'), context, 'files.read', async session => Buffer.from(await session.readDockerFileAs(container, undefined, { maxBytes: 1_000_000 })).toString('utf8'));
+    }
     const target = this.file(name);
     return this.use(this.scope(context, 'files.read'), context, 'files.read', session => this.fileAction(context, target, async () => Buffer.from(await session.readDockerFileAs(target.absolute, undefined, { maxBytes: 1_000_000 })).toString('utf8')));
   }
   async readBytes(context: RunContext, name: string): Promise<Uint8Array> {
+    if (this.config.layout === 'v2') {
+      const { container } = await this.v2Target(context, name);
+      return this.use(this.scope(context, 'files.read'), context, 'files.read', session => session.readDockerFileAs(container, undefined, { maxBytes: 20_000_000 }));
+    }
     const target = this.file(name);
     return this.use(this.scope(context, 'files.read'), context, 'files.read', session => this.fileAction(context, target, () => session.readDockerFileAs(target.absolute, undefined, { maxBytes: 20_000_000 })));
   }
   async listFiles(context: RunContext, name = '.'): Promise<string[]> {
+    if (this.config.layout === 'v2') {
+      const { container } = await this.v2Target(context, name);
+      return this.use(this.scope(context, 'files.read'), context, 'files.read', async session => (await session.listDir({ path: container })).slice(0, 500).map(entry => entry.name));
+    }
     const target = this.file(name);
     return this.use(this.scope(context, 'files.read'), context, 'files.read', session => this.fileAction(context, target, async () => (await session.listDir({ path: target.absolute })).slice(0, 500).map(entry => entry.name)));
   }
+  async directoryVersion(context: RunContext, name: string, childFile: string): Promise<string | undefined> {
+    this.check(context, 'files.read');
+    if (this.config.layout === 'v2') {
+      const { host } = await this.v2Target(context, name);
+      const version = await directoryVersion(host, childFile);
+      this.check(context, 'files.read');
+      await this.v2Target(context, name);
+      return version;
+    }
+    const target = this.file(name);
+    const directory = await workspaceEntry(this.config.root, context, target);
+    const version = await directoryVersion(directory, childFile);
+    this.check(context, 'files.read');
+    await workspaceEntry(this.config.root, context, target);
+    return version;
+  }
   async write(context: RunContext, name: string, content: string): Promise<void> {
     if (Buffer.byteLength(content) > 1_000_000) throw new WorkspacePathError('size_limit', 'File exceeds the 1000000 byte write limit.');
+    if (this.config.layout === 'v2') {
+      const preview = await this.v2Target(context, name, false);
+      this.checkV2Write(context, preview.location);
+      const target = await this.v2Target(context, name, true);
+      this.checkV2Write(context, target.location);
+      return this.use(this.scope(context, 'files.write'), context, 'files.write', async session => {
+        this.checkV2Write(context, target.location);
+        await session.writeDockerTextFileAs(target.container, content);
+        await this.v2Target(context, name);
+        this.checkV2Write(context, target.location);
+      });
+    }
     const target = this.file(name); this.checkWrite(context, target);
     return this.use(this.scope(context, 'files.write'), context, 'files.write', async session => {
       this.check(context, 'files.write'); this.checkWrite(context, target);
@@ -227,6 +326,18 @@ export class SdkDockerExecutionService implements ExecutionBackend {
     });
   }
   async removeFile(context: RunContext, name: string): Promise<void> {
+    if (this.config.layout === 'v2') {
+      const target = await this.v2Target(context, name);
+      this.checkV2Write(context, target.location);
+      const info = await lstat(target.host);
+      if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) throw new WorkspacePathError('invalid_path', 'Only an existing regular file can be removed.');
+      return this.use(this.scope(context, 'files.write'), context, 'files.write', async session => {
+        this.checkV2Write(context, target.location);
+        await session.deleteDockerPathAs(target.container);
+        await this.v2Target(context, name);
+        this.checkV2Write(context, target.location);
+      });
+    }
     const target = this.file(name); this.checkWrite(context, target);
     if (!target.relative) throw new WorkspacePathError('invalid_path', 'Workspace roots cannot be removed. Specify a regular file.');
     return this.use(this.scope(context, 'files.write'), context, 'files.write', async session => {
@@ -255,8 +366,9 @@ export class SdkDockerExecutionService implements ExecutionBackend {
       const managed = item;
       managed.timeout = setTimeout(() => { this.track(this.close(scope)); }, context.budget.timeoutMs);
       managed.timeout.unref();
-      const launch = plan.mode === 'restricted' ? restrictedRunnerLaunch(plan.operation, WORKSPACE, this.config.networkEnabled === true) : undefined;
-      const args: ExecCommandArgs = { cmd: launch?.shellCommand ?? command, workdir: WORKSPACE, shell: '/bin/sh', login: false, tty: false, yieldTimeMs: Math.max(0, Math.min(30_000, yieldMs)) };
+      const executionRoot = this.config.layout === 'v2' ? WORKSPACE_V2 : WORKSPACE;
+      const launch = plan.mode === 'restricted' ? restrictedRunnerLaunch(plan.operation, executionRoot, this.config.networkEnabled === true) : undefined;
+      const args: ExecCommandArgs = { cmd: launch?.shellCommand ?? command, workdir: executionRoot, shell: '/bin/sh', login: false, tty: false, yieldTimeMs: Math.max(0, Math.min(30_000, yieldMs)) };
       const result = await this.use(scope, context, 'process.execute.restricted', async session => { for (const capability of plan.requiredCapabilities) this.check(context, capability); const result = await session.exec(args); for (const capability of plan.requiredCapabilities) this.check(context, capability); return result; });
       this.accept(managed, result);
       if (managed.status === 'running') { managed.completionEligible = true; this.schedulePoll(managed); }

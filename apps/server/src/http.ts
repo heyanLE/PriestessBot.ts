@@ -13,6 +13,7 @@ import { handleOperatorHttp } from './operator-http.js';
 import { handleHistoryHttp } from './history-http.js';
 import { handleManagementHttp } from './management-http.js';
 import { handleExtensionsHttp } from './extensions-http.js';
+import { handleWorkspaceHttp } from './workspace-http.js';
 import { handleMemoryMaintenanceHttp } from './memory-maintenance-http.js';
 import { handleSearchHttp } from './search-http.js';
 import { handleFileParsingHttp } from './file-parsing-http.js';
@@ -101,6 +102,7 @@ export function createRuntimeServer(runtime: PriestessRuntime, options: ServerOp
     if(await handlePluginsHttp({runtime,request,response,url,body,json}))return;
     if (await handleExtensionsHttp(runtime.extensions, request, response, url, body, json)) return;
     if (await handleMemoryMaintenanceHttp(runtime.memoryMaintenance, request, response, url, body, json)) return;
+    if (await handleWorkspaceHttp({ config: () => runtime.config(), request, response, url, json })) return;
     const route = pathname.slice('/api/ts/'.length).split('/').map(decodeURIComponent);
     const [resource, id, action] = route;
     const method = request.method;

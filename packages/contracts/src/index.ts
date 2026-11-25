@@ -6,6 +6,7 @@ import type { PublicGroupMessage } from './group-conversation.js';
 import { AuditPreviewSchema } from './audit.js';
 import { ContextPolicySchema } from './context-policy.js';
 export { ContextPolicySchema, type ContextPolicy } from './context-policy.js';
+export * from './workspace-view.js';
 
 export const AgentIdSchema = z.string().min(1).max(128).brand<'AgentId'>();
 export const RunIdSchema = z.string().min(1).max(128).brand<'RunId'>();
@@ -116,11 +117,14 @@ export const ConnectionSchema = z.object({ id: z.string().min(1), baseUrl: z.str
 });
 export const LibrarySchema = z.object({ id: z.string().min(1), displayName: z.string().min(1) }).strict();
 export const ExecutionEnvironmentSchema = z.object({ id: z.string().min(1), type: z.enum(['local', 'docker', 'sdk_docker']), root: z.string().min(1), image: z.string().optional(), networkEnabled: z.boolean().default(false) }).strict();
+/** Single workspace settings. sandbox=false means trusted-host execution. */
+export const WorkspaceConfigSchema = z.object({ root: z.string().min(1), sandbox: z.boolean().default(true), image: z.string().min(1).optional(), networkEnabled: z.boolean().default(true) }).strict();
 export const McpServerConfigSchema = z.object({ id: z.string().min(1), transport: z.enum(['stdio', 'sse', 'streamable_http']), command: z.string().optional(), args: z.array(z.string()).default([]), url: z.string().url().optional(), envRefs: z.record(z.string(), z.string()).default({}), headersEnv: z.record(z.string(), z.string()).default({}) }).strict();
+export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
 export const SkillLibrarySchema = z.object({ id: z.string().min(1), directory: z.string().min(1) }).strict();
 export const EmbeddingConfigSchema = z.object({ connectionId: z.string(), model: z.string(), dimensions: z.number().int().positive() }).strict();
 export const RerankerConfigSchema = z.object({ url: z.string().url(), apiKeyEnv: z.string(), model: z.string() }).strict();
-export const RuntimeConfigSchema = z.object({ runtime: z.literal('priestess-ts'), schemaVersion: z.literal(1), revision: z.number().int().nonnegative().default(0), agents: z.array(AgentDefinitionSchema).min(1), platforms: z.array(PlatformConfigSchema).default([]), grants: GrantListSchema.default([]), connections: z.array(ConnectionSchema).default([{ id: 'default', apiKeyEnv: 'OPENAI_API_KEY', protocol: 'responses' }]), memoryLibraries: z.array(LibrarySchema).default([]), knowledgeLibraries: z.array(LibrarySchema).default([]), executionEnvironments: z.array(ExecutionEnvironmentSchema).default([]), mcpServers: z.array(McpServerConfigSchema).default([]), skillLibraries: z.array(SkillLibrarySchema).default([]), embedding: EmbeddingConfigSchema.optional(), reranker: RerankerConfigSchema.optional(), flow: FlowConfigSchema }).strict();
+export const RuntimeConfigSchema = z.object({ runtime: z.literal('priestess-ts'), schemaVersion: z.literal(1), revision: z.number().int().nonnegative().default(0), agents: z.array(AgentDefinitionSchema).min(1), platforms: z.array(PlatformConfigSchema).default([]), grants: GrantListSchema.default([]), connections: z.array(ConnectionSchema).default([{ id: 'default', apiKeyEnv: 'OPENAI_API_KEY', protocol: 'responses' }]), memoryLibraries: z.array(LibrarySchema).default([]), knowledgeLibraries: z.array(LibrarySchema).default([]), executionEnvironments: z.array(ExecutionEnvironmentSchema).default([]), workspace: WorkspaceConfigSchema.optional(), mcpServers: z.array(McpServerConfigSchema).default([]), skillLibraries: z.array(SkillLibrarySchema).default([]), embedding: EmbeddingConfigSchema.optional(), reranker: RerankerConfigSchema.optional(), flow: FlowConfigSchema }).strict();
 export type RuntimeConfig = z.infer<typeof RuntimeConfigSchema>;
 export const ReplyPlanSchema = z.object({ parts: z.array(ContentPartSchema), replyTo: z.string().optional() }).strict();
 export type ReplyPlan = z.infer<typeof ReplyPlanSchema>;

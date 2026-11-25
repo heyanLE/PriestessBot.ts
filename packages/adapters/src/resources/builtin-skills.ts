@@ -45,14 +45,14 @@ async function existingEntry(file: string): Promise<void> {
     validateEntry(await handle.readFile('utf8'));
   } finally { await handle.close(); }
 }
-async function seed(rootName: string): Promise<{ created: boolean; path: string }> {
+async function seed(rootName: string, layout: 'legacy' | 'v2' = 'legacy'): Promise<{ created: boolean; path: string }> {
   const content = await builtinText();
   // The configured parent is an administrative location. Canonicalize its OS
   // aliases (for example /tmp on macOS), then reject links at the owned root and below.
   await mkdir(path.dirname(rootName), { recursive: true, mode: 0o700 });
   const root = path.join(await realpath(path.dirname(rootName)), path.basename(rootName));
   let directory = root;
-  for (const component of ['', 'shared', '.agent', 'skill', 'skill-packager']) {
+  for (const component of layout === 'v2' ? ['', 'global', 'skill', 'skill-packager'] : ['', 'shared', '.agent', 'skill', 'skill-packager']) {
     if (component) directory = path.join(directory, component);
     try { await mkdir(directory, { mode: 0o700 }); }
     catch (error) { if (!hasCode(error, 'EEXIST')) throw error; }
@@ -74,9 +74,10 @@ async function seed(rootName: string): Promise<{ created: boolean; path: string 
 /** Administrative startup only: call before accepting executions, never as a model tool. */
 export async function seedBuiltinSkills(config: ExecutionConfig): Promise<{ created: boolean; path: string }> {
   const root = path.resolve(config.root);
-  const previous = pending.get(root);
-  const operation = previous ? previous.then(() => seed(root)) : seed(root);
-  pending.set(root, operation);
+  const key = `${config.layout ?? 'legacy'}:${root}`;
+  const previous = pending.get(key);
+  const operation = previous ? previous.then(() => seed(root, config.layout ?? 'legacy')) : seed(root, config.layout ?? 'legacy');
+  pending.set(key, operation);
   try { return await operation; }
-  finally { if (pending.get(root) === operation) pending.delete(root); }
+  finally { if (pending.get(key) === operation) pending.delete(key); }
 }

@@ -1,0 +1,280 @@
+--- a/documents/SKILL.md
++++ b/documents/SKILL.md
+@@ -21,7 +21,7 @@
+ python <this-skill-directory>/scripts/inspect_docx.py input.docx
+ ```
+ 
+-For a quick text-only read, `astrbot_file_read_tool` is sufficient. Text extraction does not prove layout, comments, fields, tracked changes, or images are correct.
++For a quick text-only read of a local DOCX, use Python with `python-docx` to extract paragraphs. Text extraction does not prove layout, comments, fields, tracked changes, or images are correct.
+ 
+ ## Create and edit with real document structure
+ 
+--- a/documents/scripts/privacy_scrub.py
++++ b/documents/scripts/privacy_scrub.py
+@@ -82,7 +82,7 @@
+     """
+     output_path.parent.mkdir(parents=True, exist_ok=True)
+     with NamedTemporaryFile(
+-        prefix="astrbot-docx-scrub-",
++        prefix="priestess-docx-scrub-",
+         suffix=".docx",
+         dir=output_path.parent,
+         delete=False,
+--- a/documents/scripts/render_docx.py
++++ b/documents/scripts/render_docx.py
+@@ -69,7 +69,7 @@
+         )
+     output_dir.mkdir(parents=True, exist_ok=True)
+ 
+-    with TemporaryDirectory(prefix="astrbot-docx-render-") as temp_name:
++    with TemporaryDirectory(prefix="priestess-docx-render-") as temp_name:
+         temp_dir = Path(temp_name)
+         profile = temp_dir / "profile"
+         profile.mkdir()
+--- a/pdf/SKILL.md
++++ b/pdf/SKILL.md
+@@ -1,6 +1,6 @@
+ ---
+ name: pdf
+-description: Read, create, inspect, merge, split, rotate, encrypt, fill, and validate PDF files. Use when the user asks to work with a PDF or convert supported Markdown into a polished PDF in AstrBot.
++description: Read, create, inspect, merge, split, rotate, encrypt, fill, and validate PDF files. Use when the user asks to work with a PDF or convert supported Markdown into a polished PDF.
+ ---
+ 
+ # Work with PDFs
+@@ -19,7 +19,7 @@
+ 
+ ## Read and inspect
+ 
+-Use `astrbot_file_read_tool` for a quick text extraction when it is sufficient. Use Python with `pypdf` when page structure or exact metadata matters:
++For a local PDF, use Python with `pypdf` to extract text or inspect page structure and metadata:
+ 
+ ```python
+ from pypdf import PdfReader
+@@ -83,7 +83,7 @@
+ Proxy:   https://edgeone.gh-proxy.com/https://github.com/googlefonts/noto-cjk/raw/main/Sans/Variable/TTF/Subset/NotoSansSC-VF.ttf
+ ```
+ 
+-These proxies are not operated by the font project or AstrBot. Their availability and returned content can change. Never send credentials, private repository URLs, or other sensitive data through them. After downloading, verify that the final response used HTTPS, inspect the file type, and compare a checksum with an official checksum when one is published.
++These proxies are not operated by the font project or PriestessBot. Their availability and returned content can change. Never send credentials, private repository URLs, or other sensitive data through them. After downloading, verify that the final response used HTTPS, inspect the file type, and compare a checksum with an official checksum when one is published.
+ 
+ Do not download a font silently. Obtain user approval when network access or a new file is required, use HTTPS, and keep the downloaded font in a workspace or temporary directory rather than installing it system-wide.
+ 
+--- a/pdf/scripts/markdown_to_pdf.py
++++ b/pdf/scripts/markdown_to_pdf.py
+@@ -296,24 +296,24 @@
+         if not resolved.is_file():
+             raise FileNotFoundError(f"Font not found: {resolved}")
+         try:
+-            pdfmetrics.registerFont(TTFont("AstrBotPDF", str(resolved)))
++            pdfmetrics.registerFont(TTFont("PriestessBotPDF", str(resolved)))
+         except Exception as exc:
+             raise ValueError(f"Unable to load TrueType font {resolved}: {exc}") from exc
+         pdfmetrics.registerFontFamily(
+-            "AstrBotPDF",
+-            normal="AstrBotPDF",
+-            bold="AstrBotPDF",
+-            italic="AstrBotPDF",
+-            boldItalic="AstrBotPDF",
++            "PriestessBotPDF",
++            normal="PriestessBotPDF",
++            bold="PriestessBotPDF",
++            italic="PriestessBotPDF",
++            boldItalic="PriestessBotPDF",
+         )
+-        glyphs = pdfmetrics.getFont("AstrBotPDF").face.charToGlyph
++        glyphs = pdfmetrics.getFont("PriestessBotPDF").face.charToGlyph
+         for character in source:
+             if character not in "\n\r\t" and ord(character) not in glyphs:
+                 raise ValueError(
+                     f"Font {resolved} does not contain U+{ord(character):04X} "
+                     f"({character!r}). Choose a font that covers the document text."
+                 )
+-        return "AstrBotPDF", "AstrBotPDF"
++        return "PriestessBotPDF", "PriestessBotPDF"
+ 
+     system_root = Path(os.environ.get("WINDIR", "C:/Windows"))
+     candidates = (
+@@ -333,7 +333,7 @@
+     for index, candidate in enumerate(candidates):
+         if not candidate.is_file():
+             continue
+-        font_name = f"AstrBotPDFSystem{index}"
++        font_name = f"PriestessBotPDFSystem{index}"
+         try:
+             pdfmetrics.registerFont(TTFont(font_name, str(candidate)))
+         except Exception:
+@@ -378,7 +378,7 @@
+     sample = getSampleStyleSheet()
+     styles: dict[str, ParagraphStyle] = {
+         "body": ParagraphStyle(
+-            "AstrBotBody",
++            "PriestessBotBody",
+             parent=sample["BodyText"],
+             fontName=body_font,
+             fontSize=10.5,
+@@ -388,7 +388,7 @@
+             wordWrap="CJK",
+         ),
+         "quote": ParagraphStyle(
+-            "AstrBotQuote",
++            "PriestessBotQuote",
+             parent=sample["BodyText"],
+             fontName=body_font,
+             fontSize=10.5,
+@@ -405,7 +405,7 @@
+             wordWrap="CJK",
+         ),
+         "code": ParagraphStyle(
+-            "AstrBotCode",
++            "PriestessBotCode",
+             parent=sample["Code"],
+             fontName=code_font,
+             fontSize=8.5,
+@@ -419,7 +419,7 @@
+             wordWrap="CJK",
+         ),
+         "footer": ParagraphStyle(
+-            "AstrBotFooter",
++            "PriestessBotFooter",
+             parent=sample["BodyText"],
+             fontName=body_font,
+             fontSize=8,
+@@ -431,7 +431,7 @@
+     heading_sizes = {1: 24, 2: 19, 3: 16, 4: 14, 5: 12, 6: 11}
+     for level, size in heading_sizes.items():
+         styles[f"h{level}"] = ParagraphStyle(
+-            f"AstrBotHeading{level}",
++            f"PriestessBotHeading{level}",
+             parent=sample["Heading1"],
+             fontName=body_font,
+             fontSize=size,
+@@ -606,8 +606,8 @@
+         topMargin=20 * mm,
+         bottomMargin=22 * mm,
+         title=document_title,
+-        author="AstrBot",
+-        creator="AstrBot PDF Skill",
++        author="PriestessBot",
++        creator="PriestessBot PDF Skill",
+     )
+     document.build(story, onFirstPage=draw_footer, onLaterPages=draw_footer)
+ 
+@@ -620,8 +620,8 @@
+     writer.add_metadata(
+         {
+             "/Title": document_title,
+-            "/Author": "AstrBot",
+-            "/Creator": "AstrBot PDF Skill",
++            "/Author": "PriestessBot",
++            "/Creator": "PriestessBot PDF Skill",
+         }
+     )
+     output_path.parent.mkdir(parents=True, exist_ok=True)
+--- a/skill-creator/SKILL.md
++++ b/skill-creator/SKILL.md
+@@ -1,9 +1,9 @@
+ ---
+ name: skill-creator
+-description: Create, revise, and validate AstrBot Skills built around SKILL.md instruction bundles. Use when the user asks to create, scaffold, improve, package, or review a Skill for an AstrBot workspace, local installation, or plugin.
++description: Create, revise, and validate PriestessBot Skills built around SKILL.md instruction bundles. Use when the user asks to create, scaffold, improve, package, or review a Skill for a PriestessBot workspace.
+ ---
+ 
+-# Create AstrBot Skills
++# Create PriestessBot Skills
+ 
+ Build small, reusable instruction bundles that another agent can discover and follow reliably.
+ 
+@@ -31,17 +31,9 @@
+ 
+ Use the runtime declared in the system instructions and the location requested by the user. Do not infer the runtime from filesystem paths.
+ 
+-In local mode, common targets are:
++Use `list_skills` to inspect assigned libraries and their write access. Workspace v2 offers global, agent, and conversation zones. Choose the narrowest authorized scope that matches the request. External and plugin libraries are read-only.
+ 
+-- Workspace Skill: `<workspace>/skills/<skill-name>`
+-- Locally installed Skill: `<astrbot-data>/skills/<skill-name>`.
+-- Installed third-party plugin Skill: `<astrbot-data>/plugins/<plugin-name>/skills/<skill-name>`.
+-
+-If no location is specified in local mode, create the Skill under `skills/<skill-name>` in the current AstrBot workspace. Creating or modifying a locally installed Skill requires administrator access and is enforced by the filesystem tools. If permission is denied, use the workspace target and explain the fallback.
+-
+-In sandbox mode, do not use `<astrbot-data>` or attempt to install a Skill into the host AstrBot instance. Create it under `skills/<skill-name>` in the current sandbox workspace, and treat it as sandbox-scoped unless the runtime provides a dedicated persistence or release workflow.
+-
+-Treat plugin-provided Skills as read-only during normal runtime. Modify a plugin Skill only when the user is working in that plugin's source tree and has explicitly requested the change. If the requested target is not writable, create the Skill in the workspace and explain how to install or move it.
++Create or update files with `write_skill`, using the selected writable zone and a skill-relative path such as `<skill-name>/SKILL.md`. If no writable zone or tool is available, provide the proposed files without attempting a host installation.
+ 
+ ## Name the Skill
+ 
+@@ -71,28 +63,20 @@
+ ---
+ ```
+ 
+-Make the description specific enough for discovery. Put all trigger guidance in the description because AstrBot loads the body only after the Skill is selected.
++Make the description specific enough for discovery. Put all trigger guidance in the description because PriestessBot loads the body only after the Skill is selected.
+ 
+ Write the body as direct instructions:
+ 
+ - Use imperative language.
+ - Put the main workflow before edge cases.
+ - State important safety boundaries close to the affected action.
+-- Use the AstrBot tool names actually available in the current runtime when a workflow depends on tools.
++- Use the PriestessBot tool names actually available in the current runtime when a workflow depends on tools.
+ - Prefer relative paths inside the Skill so it works after installation or sandbox synchronization.
+ - Keep examples short and representative.
+ 
+ ## Initialize or update files
+ 
+-For a new Skill, prefer the bundled initializer when Python and shell execution are available:
+-
+-```text
+-python <this-skill-directory>/scripts/init_skill.py <skill-name> --path <target-skills-root> --description <description>
+-```
+-
+-Add `--resources scripts,references,assets` with only the directories that are needed. The initializer refuses to overwrite an existing Skill.
+-
+-If shell execution is unavailable, create the directory and UTF-8 `SKILL.md` with `astrbot_file_write_tool`. Create optional resources only after their content is known.
++Use `write_skill` for each file in the selected zone. Pass `overwrite: false` for a new file. Create optional resources only after their contents are known. Use the bundled Python initializer when preparing a separate source tree outside the running bot.
+ 
+ When updating a Skill, read its complete `SKILL.md` and directly referenced resources before editing. Preserve useful behavior and avoid unrelated restructuring.
+ 
+@@ -117,4 +101,4 @@
+ 
+ ## Finish
+ 
+-Report the created or updated location, included resources, validation performed, and any runtime or activation step still required. Do not enable a globally installed Skill or change an AstrBot configuration unless the user requested it.
++Report the created or updated location, included resources, validation performed, and any runtime or activation step still required. Do not enable a globally installed Skill or change the PriestessBot configuration unless the user requested it.
+--- a/skill-creator/scripts/init_skill.py
++++ b/skill-creator/scripts/init_skill.py
+@@ -1,4 +1,4 @@
+-"""Initialize a minimal AstrBot Skill directory."""
++"""Initialize a minimal PriestessBot Skill directory."""
+ 
+ from __future__ import annotations
+ 
+--- a/skill-creator/scripts/validate_skill.py
++++ b/skill-creator/scripts/validate_skill.py
+@@ -1,4 +1,4 @@
+-"""Validate the structure and frontmatter of an AstrBot Skill."""
++"""Validate the structure and frontmatter of an PriestessBot Skill."""
+ 
+ from __future__ import annotations
+ 
+@@ -72,7 +72,7 @@
+     extra_keys = sorted(set(metadata) - {"name", "description"})
+     if extra_keys:
+         warnings.append(
+-            "frontmatter contains optional keys not used for AstrBot discovery: "
++            "frontmatter contains optional keys not used for PriestessBot discovery: "
+             + ", ".join(extra_keys)
+         )
+ 
+--- a/spreadsheets/scripts/render_workbook.py
++++ b/spreadsheets/scripts/render_workbook.py
+@@ -69,7 +69,7 @@
+         )
+     output_dir.mkdir(parents=True, exist_ok=True)
+ 
+-    with TemporaryDirectory(prefix="astrbot-spreadsheet-render-") as temp_name:
++    with TemporaryDirectory(prefix="priestess-spreadsheet-render-") as temp_name:
+         temp_dir = Path(temp_name)
+         profile = temp_dir / "profile"
+         profile.mkdir()

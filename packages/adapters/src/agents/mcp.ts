@@ -4,6 +4,7 @@ import type { EngineInput, RunEvent, RuntimeConfig } from '../../../contracts/sr
 import type { AuthorizationService } from '../../../core/src/authorization.js';
 import type { RuntimeStore } from '../../../core/src/storage.js';
 import type { SdkLocalContext } from './engine.js';
+import { loadWorkspaceMcpServers } from './mcp-files.js';
 
 /** One connection set per run; no mutable tool authorization is shared across callers. */
 export class McpConnections {
@@ -11,10 +12,12 @@ export class McpConnections {
   constructor(private readonly config: () => RuntimeConfig, private readonly auth: AuthorizationService, private readonly store: RuntimeStore, private readonly secret: (key: string) => string | undefined) {}
   async tools(input: EngineInput, emit: (event: RunEvent) => void): Promise<Tool<SdkLocalContext>[]> {
     if (!input.context.effectiveCapabilities.includes('external.write')) return [];
+    const workspaceMode = this.config().workspace !== undefined;
+    const definitions = workspaceMode ? await loadWorkspaceMcpServers(this.config(), input.context) : this.config().mcpServers.filter(item => input.context.resources.mcpServers.includes(item.id));
     const servers: MCPServer[] = []; const output: Tool<SdkLocalContext>[] = [];
     this.active.set(input.context.runId, servers);
     try {
-      for (const definition of this.config().mcpServers.filter(item => input.context.resources.mcpServers.includes(item.id))) {
+      for (const definition of definitions) {
         this.auth.assert(input.context, 'external.write', input.agent, { kind: 'mcpServers', id: definition.id });
         const env: Record<string, string> = { PATH: '/usr/local/bin:/usr/bin:/bin' };
         for (const [key, reference] of Object.entries(definition.envRefs)) { const value = this.secret(reference); if (value === undefined) throw new Error('MCP credential reference unavailable'); env[key] = value; }
@@ -34,7 +37,7 @@ export class McpConnections {
         input.context.signal.throwIfAborted();
         const tools = await getAllMcpTools<SdkLocalContext>({ mcpServers: [server], includeServerInToolNames: true, convertSchemasToStrict: true, errorFunction: null });
         for (const entry of tools) {
-          if (entry.type !== 'function' || !input.context.resources.tools.includes(entry.name)) continue;
+          if (entry.type !== 'function' || (!workspaceMode && !input.context.resources.tools.includes(entry.name))) continue;
           const wrapped: Tool<SdkLocalContext> = { ...entry,
             needsApproval: input.agent.approvalTools.includes(entry.name) ? () => Promise.resolve(true) : entry.needsApproval,
             invoke: async (sdk, argumentsText, detail) => {

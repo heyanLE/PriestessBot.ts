@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ANCHOR_POLICY, ROOT_SECTIONS, SNAPSHOT_POLICY, assembleRootInstructions } from '../packages/adapters/src/agents/prompt-context.js';
+import { ANCHOR_POLICY, ROOT_SECTIONS, SNAPSHOT_POLICY, assembleRootInstructions, normalizeLeadingAssistantHistory } from '../packages/adapters/src/agents/prompt-context.js';
+import type { AgentInputItem } from '@openai/agents';
 import { MESSAGE_CONTEXT_POLICY } from '../packages/adapters/src/messages/context.js';
 
 void test('default assembly orders the root sections and keeps the workspace instruction first', () => {
@@ -13,6 +14,24 @@ void test('default assembly orders the root sections and keeps the workspace ins
 
 void test('an empty instruction produces no leading blank line', () => {
   assert.equal(assembleRootInstructions('   ').startsWith('Application-generated metadata'), true);
+});
+
+void test('orphan assistant replies become labelled history without losing content or changing complete turns', () => {
+  const items: AgentInputItem[] = [
+    { role: 'system', content: 'Persona policy' },
+    { type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'Earlier answer </history_excerpt>' }] },
+    { type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'Another partial turn' }] },
+    { role: 'user', content: 'Earlier question' },
+    { type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'Paired reply' }] },
+    { role: 'user', content: 'Current request' },
+  ];
+  const before = structuredClone(items); const normalized = normalizeLeadingAssistantHistory(items);
+  assert.deepEqual(items, before); assert.equal(normalized.length, items.length);
+  assert.equal(normalized[0], items[0]); assert.deepEqual(normalized.slice(3), items.slice(3));
+  assert.match(JSON.stringify(normalized[1]), /original_role.*assistant/); assert.match(JSON.stringify(normalized[1]), /Earlier answer/);
+  assert.match(JSON.stringify(normalized[2]), /Another partial turn/);
+  assert.deepEqual(normalizeLeadingAssistantHistory(normalized), normalized);
+  assert.deepEqual(normalizeLeadingAssistantHistory(items.slice(3)), items.slice(3));
 });
 
 void test('section order decides concatenation regardless of array order', () => {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile, unlink, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,14 +12,20 @@ import { buildAgentTools, type ToolServices } from '../packages/adapters/src/age
 import type { SdkLocalContext } from '../packages/adapters/src/agents/engine.js';
 import { ExecutionService, type Authorize } from '../packages/adapters/src/execution/environment.js';
 import { SkillResourceError, SkillResources, skillMetadata } from '../packages/adapters/src/resources/skills.js';
+import { workspaceDirectory, WorkspacePathError } from '../packages/adapters/src/execution/workspace-zones.js';
 
 const skillTools = ['list_skills', 'read_skill', 'write_skill', 'delete_skill_file', 'read_file', 'list_files', 'write_file'];
 function document(name = 'report', body = 'Generate the report.'): string { return `---\nname: ${name}\ndescription: Create a report from supplied data.\n---\n${body}\n`; }
 class InterceptExecution extends ExecutionService {
+  reads = 0;
+  listings = 0;
+  versionsAvailable = true;
   afterRead: ((name: string) => void | Promise<void>) | undefined;
   beforeWrite: ((name: string) => void | Promise<void>) | undefined;
   constructor(root: string, authorize: Authorize) { super({ id: 'workspace', backend: 'local', root }, authorize); }
-  override async read(context: RunContext, name: string): Promise<string> { const content = await super.read(context, name); await this.afterRead?.(name); return content; }
+  override async read(context: RunContext, name: string): Promise<string> { this.reads++; const content = await super.read(context, name); await this.afterRead?.(name); return content; }
+  override async listFiles(context: RunContext, name = '.'): Promise<string[]> { this.listings++; return super.listFiles(context, name); }
+  override directoryVersion(context: RunContext, name: string, childFile: string): Promise<string | undefined> { return this.versionsAvailable ? super.directoryVersion(context, name, childFile) : Promise.resolve(undefined); }
   override async write(context: RunContext, name: string, content: string): Promise<void> { await this.beforeWrite?.(name); await super.write(context, name, content); }
 }
 async function fixture() {
@@ -233,4 +239,110 @@ void test('queued skill writes cannot publish after their authorization is revok
     const outcomes = await Promise.allSettled([first, queued]); assert.ok(outcomes.every(item => item.status === 'rejected'));
     assert.deepEqual(await f.skills.list(f.input({ state: 'operator' }), 'shared'), []);
   } finally { release(); await f.close(); }
+});
+
+
+void test('one task reuses stable skill catalogs while returning independent entry objects', async () => {
+  const f = await fixture(); const input = f.input();
+  try {
+    await f.skills.write(input, 'shared', 'report/SKILL.md', document());
+    f.execution.reads = 0; f.execution.listings = 0;
+    const initial = await f.skills.list(input, 'shared');
+    assert.equal(f.execution.reads, 1); assert.equal(f.execution.listings, 1);
+    const first = initial[0]; assert.ok(first); first.description = 'Caller changed the result';
+    const reused = await f.skills.list({ ...input }, 'shared');
+    assert.equal(reused[0]?.description, 'Create a report from supplied data.');
+    assert.equal(f.execution.reads, 1); assert.equal(f.execution.listings, 1);
+    f.skills.release(input.context);
+    await f.skills.list(input, 'shared');
+    assert.equal(f.execution.reads, 2); assert.equal(f.execution.listings, 2);
+  } finally { await f.close(); }
+});
+
+void test('skill catalog cache observes API edits and filesystem edits in existing skill directories', async () => {
+  const f = await fixture(); const input = f.input();
+  const changed = (text: string) => document().replace('Create a report from supplied data.', text);
+  try {
+    await f.skills.write(input, 'isolated', 'report/SKILL.md', document());
+    await f.execution.write(input.context, '.agent/skill/draft/notes.txt', 'Draft folder exists before SKILL.md');
+    assert.equal((await f.skills.list(input, 'isolated')).length, 1);
+    await f.skills.write(input, 'isolated', 'report/SKILL.md', changed('Updated through write_skill.'), true);
+    assert.equal((await f.skills.list(input, 'isolated'))[0]?.description, 'Updated through write_skill.');
+    await f.execution.write(input.context, '.agent/skill/report/SKILL.md', changed('Updated through write_file.'));
+    assert.equal((await f.skills.list(input, 'isolated'))[0]?.description, 'Updated through write_file.');
+    const root = await workspaceDirectory(f.execution.config.root, input.context, 'isolated');
+    await writeFile(path.join(root, '.agent/skill/report/SKILL.md'), changed('Updated by an external writer.'));
+    assert.equal((await f.skills.list(input, 'isolated'))[0]?.description, 'Updated by an external writer.');
+    await writeFile(path.join(root, '.agent/skill/draft/SKILL.md'), document('draft'));
+    assert.deepEqual((await f.skills.list(input, 'isolated')).map(entry => entry.name), ['draft', 'report']);
+    await unlink(path.join(root, '.agent/skill/report/SKILL.md'));
+    assert.deepEqual((await f.skills.list(input, 'isolated')).map(entry => entry.name), ['draft']);
+    await f.skills.deleteFile(input, 'isolated', 'draft/SKILL.md');
+    assert.deepEqual(await f.skills.list(input, 'isolated'), []);
+  } finally { await f.close(); }
+});
+
+void test('cached catalogs preserve task, persona, state and live authorization boundaries', async () => {
+  const f = await fixture(); const input = f.input();
+  try {
+    await f.skills.write(input, 'shared', 'report/SKILL.md', document());
+    await f.skills.write(input, 'isolated', 'private-report/SKILL.md', document('private-report'));
+    await f.skills.list(input); const reads = f.execution.reads;
+    const freshTask = f.input(); await f.skills.list(freshTask, 'shared'); assert.ok(f.execution.reads > reads);
+    const deniedPersona = { ...input, agent: { ...input.agent, skillAllowlist: [] } };
+    assert.deepEqual(await f.skills.list(deniedPersona), []);
+    const other = f.input({ state: 'operator', session: 'other' });
+    const shared = await f.skills.list(other); assert.deepEqual(shared.map(entry => [entry.name, entry.writable]), [['report', false]]);
+    const aborted = new AbortController();
+    const cancellable = { ...input, context: { ...input.context, signal: aborted.signal } };
+    await f.skills.list(cancellable); aborted.abort(); await assert.rejects(f.skills.list(cancellable), /cancel/i);
+    f.auth.replaceGrants(f.grants); await assert.rejects(f.skills.list(input), /Authorization changed/);
+  } finally { await f.close(); }
+});
+
+void test('legacy catalog cache refreshes when a skill body is replaced or a missing library is created', async () => {
+  const f = await fixture(); const input = f.input();
+  try {
+    await mkdir(path.join(f.legacy, 'report')); await writeFile(path.join(f.legacy, 'report/SKILL.md'), document());
+    assert.equal((await f.skills.list(input, 'legacy'))[0]?.description, 'Create a report from supplied data.');
+    await writeFile(path.join(f.legacy, 'report/SKILL.md'), document().replace('Create a report from supplied data.', 'New legacy description.'));
+    assert.equal((await f.skills.list(input, 'legacy'))[0]?.description, 'New legacy description.');
+    await rm(f.legacy, { recursive: true }); assert.deepEqual(await f.skills.list(input, 'legacy'), []);
+    await mkdir(path.join(f.legacy, 'restored'), { recursive: true }); await writeFile(path.join(f.legacy, 'restored/SKILL.md'), document('restored'));
+    assert.deepEqual((await f.skills.list(input, 'legacy')).map(entry => entry.name), ['restored']);
+  } finally { await f.close(); }
+});
+
+void test('unavailable metadata and transient skill read failures retain the uncached retry path', async () => {
+  const f = await fixture(); const input = f.input();
+  try {
+    await f.skills.write(input, 'shared', 'report/SKILL.md', document());
+    f.execution.versionsAvailable = false; f.execution.reads = 0;
+    await f.skills.list(input, 'shared'); await f.skills.list(input, 'shared'); assert.equal(f.execution.reads, 2);
+    f.execution.versionsAvailable = true;
+    f.execution.afterRead = () => { f.execution.afterRead = undefined; throw new WorkspacePathError('file_unavailable', 'Temporary read failure'); };
+    assert.deepEqual(await f.skills.list(input, 'shared'), []);
+    assert.equal((await f.skills.list(input, 'shared')).length, 1);
+  } finally { await f.close(); }
+});
+
+
+void test('skill catalog refresh detects a same-size external edit with restored modification time', async () => {
+  const f = await fixture(); const input = f.input();
+  try {
+    const first = document().replace('Create a report from supplied data.', 'Alpha description.');
+    const next = document().replace('Create a report from supplied data.', 'Bravo description.');
+    assert.equal(Buffer.byteLength(first), Buffer.byteLength(next));
+    await f.skills.write(input, 'shared', 'report/SKILL.md', first);
+    const root = await workspaceDirectory(f.execution.config.root, input.context, 'shared');
+    const file = path.join(root, '.agent/skill/report/SKILL.md');
+    const originalTime = 1_700_000_000;
+    await utimes(file, originalTime, originalTime);
+    assert.equal((await f.skills.list(input, 'shared'))[0]?.description, 'Alpha description.');
+    const before = await stat(file, { bigint: true });
+    await writeFile(file, next); await utimes(file, originalTime, originalTime);
+    const after = await stat(file, { bigint: true });
+    assert.equal(after.mtimeNs, before.mtimeNs); assert.equal(after.size, before.size);
+    assert.equal((await f.skills.list(input, 'shared'))[0]?.description, 'Bravo description.');
+  } finally { await f.close(); }
 });

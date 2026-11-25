@@ -5,9 +5,10 @@ import { BangumiSettingsSchema } from './bangumi.js';
 import { MarkdownSettingsSchema } from './markdown.js';
 import { ReminiscenceSettingsSchema } from './reminiscence.js';
 const revision = z.number().int().nonnegative();
-export const PluginIdSchema = z.enum(['qq_file','markdown_killer','bili_video','bangumi','local_reminiscence']);
+export const PluginIdSchema = z.enum(['qq_file','markdown_killer','bili_video','bangumi','local_reminiscence','response_scenes']);
 export type PluginId = z.infer<typeof PluginIdSchema>;
 export const PluginRecordSchema = z.discriminatedUnion('id', [
+  z.object({ id:z.literal('response_scenes'), revision, settings:z.object({ enabled:z.boolean().default(false), agentIds:z.array(z.string().min(1)).default([]) }).strict() }),
   z.object({ id:z.literal('qq_file'), revision, settings:QqFileSettingsSchema }),
   z.object({ id:z.literal('markdown_killer'), revision, settings:MarkdownSettingsSchema }),
   z.object({ id:z.literal('bili_video'), revision, settings:BilibiliSettingsSchema }),
@@ -18,6 +19,7 @@ export type PluginRecord = z.infer<typeof PluginRecordSchema>;
 export const PluginCatalogueSchema = z.object({ plugins:z.array(z.object({ id:PluginIdSchema, name:z.string(), description:z.string(), source:z.url(), record:PluginRecordSchema, tools:z.array(z.string()), commands:z.array(z.string()), status:z.enum(['enabled','disabled','failed']), diagnostic:z.string() })) });
 export const PluginToolCatalogueSchema = z.object({ tools:z.array(z.object({id:z.string(),label:z.string(),detail:z.string()})) });
 export const pluginMetadata: Record<PluginId,{name:string;description:string;source:string;commands:string[]}> = {
+ response_scenes:{name:'回答剧本',description:'注入 Skill 索引，由当前 Agent 按需读取回答规范和正反例',source:'https://agentskills.io/specification',commands:[]},
  qq_file:{name:'QQ 群文件与管理',description:'群文件、相册、成员、公告及文件上传自动处理',source:'https://github.com/xkeyC/astrbot_plugin_qq_file',commands:[]},
  markdown_killer:{name:'Markdown 消息整理',description:'整理消息格式，渲染表格和公式图片',source:'https://github.com/xkeyC/astrbot_plugin_markdown_killer',commands:[]},
  bili_video:{name:'哔哩哔哩',description:'视频、字幕、总结、内容检索及 UP 订阅',source:'https://github.com/xkeyC/astrbot_plugin_biliVideo',commands:['/总结','/重新总结','/最新视频','/订阅','/取消订阅','/订阅列表','/检查更新','/识别开关','/B站登录']},

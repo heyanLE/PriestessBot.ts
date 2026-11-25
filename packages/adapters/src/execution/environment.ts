@@ -8,11 +8,13 @@ import type { IPty } from 'node-pty';
 import type { Capability, RunContext } from '../../../contracts/src/index.js';
 import { CommandPolicyError, compileCommandPolicy } from '../../../core/src/command-policy.js';
 import { restrictedRunnerLaunch } from './restricted-runner.js';
+import { directoryVersion } from './directory-version.js';
 import { assertWorkspaceWrite, ISOLATED_WORKSPACE, SHARED_WORKSPACE, workspaceDirectory, workspaceEntry, workspaceFailure, WorkspacePathError, workspacePath } from './workspace-zones.js';
+import { WorkspaceLayoutError, workspaceEntryV2, workspaceToolPath, assertWorkspaceWrite as assertWorkspaceV2Write, type WorkspaceLocation } from './workspace-layout.js';
 import { cleanTerminalOutput, DEFAULT_MAX_OUTPUT_TOKENS, ProcessOutputLog, truncateOutput } from './output.js';
 
 export type Authorize = (context: RunContext, capability: Capability) => void;
-export interface ExecutionConfig { readonly root: string; readonly backend: 'local' | 'docker' | 'sdk_docker'; readonly id?: string; readonly dockerImage?: string; readonly maxProcesses?: number; readonly networkEnabled?: boolean; }
+export interface ExecutionConfig { readonly root: string; readonly backend: 'local' | 'docker' | 'sdk_docker'; readonly id?: string; readonly dockerImage?: string; readonly maxProcesses?: number; readonly networkEnabled?: boolean; readonly layout?: 'legacy' | 'v2'; }
 export interface ProcessSnapshot { id: string; status: 'running' | 'completed' | 'failed' | 'cancelled'; output: string; offset: number; truncated: boolean; exitCode?: number; originalChars?: number; originalEstimatedTokens?: number; returnedFrom?: number; nextOffset?: number; fullOutputAvailable?: boolean; droppedChars?: number; retainedThrough?: number; }
 /** Runtime tools await either backend without changing the synchronous legacy API. */
 export interface ExecutionBackend {
@@ -21,6 +23,7 @@ export interface ExecutionBackend {
   read(context: RunContext, name: string): Promise<string>;
   readBytes(context: RunContext, name: string): Promise<Uint8Array>;
   listFiles(context: RunContext, name?: string): Promise<string[]>;
+  directoryVersion?(context: RunContext, name: string, childFile: string): Promise<string | undefined>;
   write(context: RunContext, name: string, content: string): Promise<void>;
   patch(context: RunContext, name: string, oldText: string, newText: string): Promise<void>;
   removeFile?(context: RunContext, name: string): Promise<void>;
@@ -47,13 +50,38 @@ export class ExecutionService implements ExecutionBackend {
   onCompletion(callback: (context: RunContext, result: ProcessSnapshot) => Promise<void>): void { this.completion = callback; }
   private owner(context: RunContext): string { return JSON.stringify([context.principal.platform, context.principal.sessionType ?? 'private', context.principal.sessionId, context.principal.senderId, context.agentId, context.generation]); }
   private processOwner(context: RunContext): string { return JSON.stringify([this.owner(context), context.runtimeState, context.grantVersion]); }
+  private isWorkspaceV2(): boolean { return this.config.layout === 'v2'; }
+  private layoutFailure(error: unknown): never {
+    if (error instanceof WorkspaceLayoutError) throw new WorkspacePathError(error.code === 'forbidden' ? 'forbidden' : error.code === 'invalid_path' ? 'invalid_path' : 'invalid_path', error.message);
+    throw error;
+  }
+  private async v2Target(context: RunContext, name: string, create = false): Promise<{ location: WorkspaceLocation; file: string }> {
+    try {
+      const location = workspaceToolPath(context, name);
+      const file = await workspaceEntryV2(this.config.root, location, create);
+      return { location, file };
+    } catch (error) { this.layoutFailure(error); }
+  }
+  private assertEnvironment(context: RunContext): void {
+    if (this.isWorkspaceV2()) return;
+    if (context.resources.executionEnvironment === 'none' || context.resources.executionEnvironment !== (this.config.id ?? this.config.backend)) throw new Error('Execution environment is not assigned');
+  }
   private async workspace(context: RunContext, zone: 'isolated' | 'shared' = 'isolated'): Promise<string> {
-    if (context.resources.executionEnvironment !== (this.config.id ?? this.config.backend)) throw new Error('Execution environment is not assigned');
+    this.assertEnvironment(context);
+    if (this.isWorkspaceV2()) return path.resolve(this.config.root);
     return workspaceDirectory(this.config.root, context, zone);
   }
   private async resolve(context: RunContext, name: string, writing = false): Promise<string> {
+    this.assertEnvironment(context);
+    if (this.isWorkspaceV2()) {
+      const { location, file } = await this.v2Target(context, name, false);
+      if (writing) {
+        try { assertWorkspaceV2Write(context, location.zone, location.area); } catch (error) { this.layoutFailure(error); }
+        if (location.area === 'skill' || location.area === 'mcp') this.authorize(context, 'resources.manage');
+      }
+      return file;
+    }
     const selected = workspacePath(name);
-    if (context.resources.executionEnvironment !== (this.config.id ?? this.config.backend)) throw new Error('Execution environment is not assigned');
     if (writing) {
       assertWorkspaceWrite(context, selected);
       if (selected.zone === 'shared') this.authorize(context, 'resources.manage');
@@ -84,9 +112,34 @@ export class ExecutionService implements ExecutionBackend {
     const directory = await this.resolve(context, name);
     try { const names = (await readdir(directory)).slice(0, 500); this.authorize(context, 'files.read'); await this.resolve(context, name); return names; } catch (error) { throw workspaceFailure(error); }
   }
+  async directoryVersion(context: RunContext, name: string, childFile: string): Promise<string | undefined> {
+    this.authorize(context, 'files.read');
+    const directory = await this.resolve(context, name);
+    const version = await directoryVersion(directory, childFile);
+    this.authorize(context, 'files.read');
+    await this.resolve(context, name);
+    return version;
+  }
   async write(context: RunContext, name: string, content: string): Promise<void> {
     this.authorize(context, 'files.write');
     if (Buffer.byteLength(content) > 1_000_000) throw new WorkspacePathError('size_limit', 'File exceeds the 1000000 byte write limit.');
+    if (this.isWorkspaceV2()) {
+      const preview = await this.v2Target(context, name, false);
+      try { assertWorkspaceV2Write(context, preview.location.zone, preview.location.area); } catch (error) { this.layoutFailure(error); }
+      if (preview.location.area === 'skill' || preview.location.area === 'mcp') this.authorize(context, 'resources.manage');
+      const { location, file } = await this.v2Target(context, name, true);
+      try { assertWorkspaceV2Write(context, location.zone, location.area); } catch (error) { this.layoutFailure(error); }
+      if (location.area === 'skill' || location.area === 'mcp') this.authorize(context, 'resources.manage');
+      await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+      const temporary = `${file}.${randomUUID()}.tmp`;
+      await writeFile(temporary, content, { mode: 0o600, flag: 'wx' });
+      this.authorize(context, 'files.write');
+      await this.v2Target(context, name, false);
+      this.authorize(context, 'files.write');
+      if (location.area === 'skill' || location.area === 'mcp') this.authorize(context, 'resources.manage');
+      await rename(temporary, file);
+      return;
+    }
     const file = await this.resolve(context, name, true);
     await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
     const temporary = `${file}.${randomUUID()}.tmp`;
@@ -104,6 +157,19 @@ export class ExecutionService implements ExecutionBackend {
   }
   async removeFile(context: RunContext, name: string): Promise<void> {
     this.authorize(context, 'files.write');
+    if (this.isWorkspaceV2()) {
+      const { location, file } = await this.v2Target(context, name, false);
+      try { assertWorkspaceV2Write(context, location.zone, location.area); } catch (error) { this.layoutFailure(error); }
+      if (location.area === 'skill' || location.area === 'mcp') this.authorize(context, 'resources.manage');
+      try {
+        const info = await lstat(file);
+        if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) throw new WorkspacePathError('invalid_path', 'Only a regular file can be removed.');
+        this.authorize(context, 'files.write'); await this.v2Target(context, name, false); this.authorize(context, 'files.write');
+        if (location.area === 'skill' || location.area === 'mcp') this.authorize(context, 'resources.manage');
+        await unlink(file);
+      } catch (error) { throw workspaceFailure(error); }
+      return;
+    }
     const selected = workspacePath(name); assertWorkspaceWrite(context, selected);
     if (!selected.relative) throw new WorkspacePathError('invalid_path', 'Workspace roots cannot be removed. Specify a regular file.');
     const file = await this.resolve(context, name, true);
@@ -124,7 +190,7 @@ export class ExecutionService implements ExecutionBackend {
     if (plan.mode === 'full_shell') this.authorize(context, 'process.pty');
     if ([...this.processes.values()].filter(item => item.status === 'running').length >= (this.config.maxProcesses ?? 8)) throw new Error('Process capacity exceeded');
     const cwd = await this.workspace(context);
-    const shared = this.config.backend === 'docker' ? await this.workspace(context, 'shared') : undefined;
+    const shared = !this.isWorkspaceV2() && this.config.backend === 'docker' ? await this.workspace(context, 'shared') : undefined;
     const sharedWritable = context.runtimeState === 'elite_operator' && context.effectiveCapabilities.includes('resources.manage');
     if (shared !== undefined && sharedWritable) this.authorize(context, 'resources.manage');
     for (const capability of plan.requiredCapabilities) this.authorize(context, capability);

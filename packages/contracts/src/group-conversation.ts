@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ModelFileReferenceSchema } from './model-files.js';
 
 /** Public conversation content only. Tool traces and authority are deliberately absent. */
 export const PublicGroupImageSchema = z.object({
@@ -11,6 +12,7 @@ export const PublicGroupMessageSchema = z.object({
   role: z.enum(['user', 'assistant']), text: z.string(),
   messageId: z.string(), senderId: z.string(), senderName: z.string(), timestamp: z.number().int().nonnegative(),
   images: z.array(PublicGroupImageSchema).optional(),
+  files: z.array(ModelFileReferenceSchema.extend({ name: z.string() })).max(20).optional(),
 }).strict();
 export type PublicGroupMessage = z.infer<typeof PublicGroupMessageSchema>;
 export const PublicGroupTurnSchema = z.object({ runId: z.string(), messages: z.array(PublicGroupMessageSchema).min(2) }).strict();

@@ -331,3 +331,48 @@ await test('Docker SDK later cleanup recovery clears prior rejected cleanup prom
     available = true; service.stop(); await service.drain(); assert.equal(session.closed, 4); await service.drain();
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+async function v2Fixture(): Promise<{ root: string; service: SdkDockerExecutionService; created: { session: FakeSession; manifest: Manifest; options: DockerSandboxClientOptions }[]; dispose: () => Promise<void> }> {
+  const root = await mkdtemp(path.join(tmpdir(), 'priestess-sdk-docker-v2-'));
+  const created: { session: FakeSession; manifest: Manifest; options: DockerSandboxClientOptions }[] = [];
+  const factory: DockerSessionFactory = (manifest, options) => { const session = new FakeSession(); created.push({ session, manifest, options }); return Promise.resolve(session); };
+  const service = new SdkDockerExecutionService({ root, backend: 'sdk_docker', id: 'workspace', layout: 'v2', networkEnabled: false }, authorize, factory);
+  return { root, service, created, dispose: async () => { service.stop(); await service.drain(); await rm(root, { recursive: true, force: true }); } };
+}
+
+await test('Docker SDK v2 mounts only global, current Agent and current conversation zones', async () => {
+  const f = await v2Fixture(); const elite = context();
+  try {
+    await f.service.write(elite, '/workspace/global/file/global.txt', 'global');
+    await f.service.write(elite, '/workspace/agents/agent/file/agent.txt', 'agent');
+    await f.service.write(elite, '/workspace/conversations/napcat/group/chat/file/conversation.txt', 'conversation');
+    const manifest = f.created[0]?.manifest; assert.ok(manifest);
+    assert.equal(manifest.root, '/workspace');
+    for (const key of ['global', 'agents/agent', 'conversations/napcat/group/chat']) {
+      const entry = manifest.entries[key]; assert.ok(entry?.type === 'mount' && entry.readOnly === false, key);
+    }
+    assert.equal(f.created[0]?.session.files.get('/workspace/global/file/global.txt'), 'global');
+    assert.equal(f.created[0]?.session.files.get('/workspace/agents/agent/file/agent.txt'), 'agent');
+    assert.equal(f.created[0]?.session.files.get('/workspace/conversations/napcat/group/chat/file/conversation.txt'), 'conversation');
+    await f.service.execute(elite, 'printf hello', 50);
+    assert.equal(f.created[0]?.session.execCalls.at(-1)?.workdir, '/workspace');
+  } finally { await f.dispose(); }
+});
+
+await test('Docker SDK v2 gives lower states writable cache and read-only skill, mcp and file', async () => {
+  const f = await v2Fixture(); const operator: RunContext = { ...context(), runtimeState: 'operator' };
+  try {
+    await f.service.write(operator, '/workspace/agents/agent/cache/cache.txt', 'cache');
+    const manifest = f.created[0]?.manifest; assert.ok(manifest);
+    const agentSkill = manifest.entries['agents/agent/skill']; const agentMcp = manifest.entries['agents/agent/mcp']; const agentFile = manifest.entries['agents/agent/file']; const agentCache = manifest.entries['agents/agent/cache'];
+    assert.ok(agentSkill?.type === 'mount' && agentSkill.readOnly === true);
+    assert.ok(agentMcp?.type === 'mount' && agentMcp.readOnly === true);
+    assert.ok(agentFile?.type === 'mount' && agentFile.readOnly === true);
+    assert.ok(agentCache?.type === 'mount' && agentCache.readOnly === false);
+    assert.equal(manifest.entries['conversations/napcat/group/chat/mcp'], undefined);
+    await assert.rejects(f.service.write(operator, '/workspace/agents/agent/file/no.txt', 'no'), /Only elite_operator/u);
+    await assert.rejects(f.service.write(operator, '/workspace/agents/agent/skill/no/SKILL.md', 'no'), /Only elite_operator/u);
+    await assert.rejects(f.service.write(operator, '/workspace/global/cache/no.txt', 'no'), /elite_operator/u);
+    await assert.rejects(f.service.write(operator, '/workspace/conversations/napcat/group/chat/mcp/x.json', '{}'), /does not support MCP/u);
+  } finally { await f.dispose(); }
+});

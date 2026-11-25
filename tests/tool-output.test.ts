@@ -49,6 +49,33 @@ void test('smaller run budget truncates early; literal search paginates and neve
     assert.equal(state.service.search(state.input, { id, query: '^.*$' }).matches.length, 0);
   } finally { state.close(); }
 });
+void test('search text and preview titles respect the small-window turn limit, with retrievable complete results', () => {
+  const state = setup();
+  try {
+    const input = { ...state.input, agent: { ...state.input.agent, contextPolicy: { ...state.input.agent.contextPolicy, contextWindowTokens: 4096 } } };
+    const turn: SdkLocalContext = { runId: input.context.runId };
+    const list = JSON.stringify({ results: [{ title: 'Search title', summary: '文'.repeat(100) }] });
+    const process = (text: string) => state.service.process(input, 'web_search', text, {}, turn);
+    let remaining = 512;
+    while (remaining >= estimateTextTokens(list)) {
+      assert.equal(process(list), list);
+      remaining -= estimateTextTokens(list);
+    }
+    const longTitle = '标😀'.repeat(2000);
+    const large = JSON.stringify({ results: [{ title: longTitle, summary: 'complete entry' }] });
+    const notice = String(process(large));
+    const title = notice.split('\n')[0]?.slice('1 search results. '.length) ?? '';
+    assert.ok(title.length > 0 && longTitle.startsWith(title));
+    assert.ok(estimateTextTokens(title) <= remaining);
+    const id = savedId(state.store);
+    assert.equal(state.service.read(input, { id }).text, large);
+    assert.equal(state.service.search(input, { id, query: 'complete entry' }).matches.length, 1);
+    assert.match(String(process(list)), /^1 search results\.\n\[Tool output truncated/u);
+    const error = JSON.stringify({ error: 'Search provider timed out', code: 'provider_timeout' });
+    assert.equal(process(error), error);
+    assert.equal(state.service.process(input, 'plugin_lookup', list, {}, turn), list);
+  } finally { state.close(); }
+});
 void test('multimodal images and files remain structured; JSON strings are not misinterpreted as multimodal', () => {
   const state = setup();
   try {
